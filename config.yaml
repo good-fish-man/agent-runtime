@@ -1,0 +1,30 @@
+# agent-runtime configuration
+server:
+  grpc_addr: ":18080"
+  http_addr: ":18081"
+  default_model:
+    provider: "openai"
+    name: "gpt-4o-mini"
+    api_key: "${DEFAULT_API_KEY}"
+    api_base: "https://api.openai.com/v1"
+
+db:
+  enabled: true
+  db_type: "postgres"
+  username: "postgres"
+  password: ""
+  db_host: "localhost"
+  db_port: 5432
+  db_name: "agent_runtime"
+  ssl_mode: "disable"
+
+memory:
+  enabled: false
+  auto_migrate: true
+  inject_into_prompt: true
+  background_review: true
+  max_review_memory: 10
+
+skills:
+  dir: "skills"
+  config_path: "config/skills-config.yaml"
