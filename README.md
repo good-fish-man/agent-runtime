@@ -139,7 +139,7 @@ Do not commit API keys. In the full platform, model credentials are resolved by 
 
 ## Built-in Capabilities
 
-The runtime can select `Glob`, `Grep`, `Read`, `Edit`, `Write`, `Bash`, web search/fetch, planning, task, and question tools. Bundled skills currently include browser automation, CSV analysis, MarkItDown, PowerPoint generation, S3 upload, and skill creation.
+The runtime can select `Glob`, `Grep`, `Read`, `Edit`, `Write`, `Bash`, web search/fetch, planning, task, and question tools. Public release archives include browser automation, CSV analysis, MarkItDown, S3 upload, and skill creation. The repository's PowerPoint skill source is excluded from releases because its third-party terms restrict redistribution.
 
 Tools and skills are selected from the current prompt and recent context. Filesystem tools are scoped to the request's `project_dir`.
 
@@ -165,4 +165,4 @@ Inbound trace headers are propagated through HTTP, gRPC, database/model calls, a
 
 ## License
 
-Add a repository license before redistributing Athena or bundled third-party skills. Individual bundled skills may include their own license files.
+Athena Agent Runtime is licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for attribution and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for bundled components governed by separate terms.

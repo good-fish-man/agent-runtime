@@ -52,8 +52,12 @@ jobs:
           extension=""
           if [ "$GOOS" = "windows" ]; then extension=".exe"; fi
           go build -trimpath -ldflags "-s -w" -o "package/$name/agent-runtime$extension" ./cmd/server
-          cp README.md config.yaml "package/$name/"
-          cp -R skills "package/$name/skills"
+          cp README.md README.zh-CN.md LICENSE NOTICE THIRD_PARTY_NOTICES.md config.yaml "package/$name/"
+          mkdir -p "package/$name/skills"
+          for skill in skills/*; do
+            [ "$(basename "$skill")" = "pptx" ] && continue
+            cp -R "$skill" "package/$name/skills/"
+          done
           if [ "$GOOS" = "windows" ]; then
             (cd package && zip -qr "../dist/$name.zip" "$name")
           else

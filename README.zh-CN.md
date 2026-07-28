@@ -139,7 +139,7 @@ skills:
 
 ## 内置能力
 
-Runtime 可按需选择 `Glob`、`Grep`、`Read`、`Edit`、`Write`、`Bash`、联网搜索、计划、任务和提问工具。仓库内置浏览器自动化、CSV 分析、MarkItDown、PowerPoint、S3 上传和 Skill 创建等 Skills。
+Runtime 可按需选择 `Glob`、`Grep`、`Read`、`Edit`、`Write`、`Bash`、联网搜索、计划、任务和提问工具。公开发行包包含浏览器自动化、CSV 分析、MarkItDown、S3 上传和 Skill 创建等 Skills。仓库中的 PowerPoint Skill 受第三方条款限制，不会进入公开发行包。
 
 Tools 和 Skills 会根据当前描述与最近上下文进行筛选。文件工具的访问范围由请求中的 `project_dir` 限定。
 
@@ -165,4 +165,4 @@ go build -o bin/server ./cmd/server
 
 ## 许可证
 
-公开分发 Athena 或仓库内第三方 Skills 前，请为仓库补充许可证。部分内置 Skills 自带独立许可证文件。
+Athena Agent Runtime 使用 [Apache License 2.0](LICENSE)。版权声明参见 [NOTICE](NOTICE)，使用独立条款的内置组件参见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
