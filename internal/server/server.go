@@ -18,6 +18,7 @@ import (
 	"github.com/good-fish-man/agent-runtime/internal/eino"
 	"github.com/good-fish-man/agent-runtime/internal/memory"
 	"github.com/good-fish-man/agent-runtime/log"
+	"github.com/good-fish-man/agent-runtime/pkg/errtrace"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -238,18 +239,18 @@ func (s *Server) Run(ctx context.Context, req *runtimev1.RunRequest) (*runtimev1
 	log.Infow("run", "prompt_len", len(req.GetPrompt()), "messages", len(req.GetMessages()), "stream", false)
 	mc, err := s.modelConfig(req.GetModels())
 	if err != nil {
-		return nil, err
+		return nil, errtrace.Wrap(err, "Server.Run.modelConfig")
 	}
 	client, err := eino.NewClient(ctx, mc)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "init model: %v", err)
+		return nil, errtrace.GRPC(err, codes.Internal, "Server.Run.NewClient", "init model")
 	}
 	instruction, sessionID, userID, agentID := s.memoryInstruction(ctx, req.GetContext())
 	disp := s.newRunDispatcher(client, req, instruction)
 	start := time.Now()
 	res, err := disp.Run(ctx, req.GetPrompt(), fromProtoMessages(req.GetMessages()))
 	if err != nil {
-		return nil, status.Errorf(codes.Unavailable, "model call failed: %v", err)
+		return nil, errtrace.GRPC(err, codes.Unavailable, "Server.Run.Dispatch", "model call failed")
 	}
 	s.reviewMemories(mc, sessionID, userID, agentID, req.GetPrompt(), res.Content)
 	return &runtimev1.RunResponse{
@@ -278,18 +279,18 @@ func (s *Server) RunAgent(ctx context.Context, req *runtimev1.AgentRequest) (*ru
 	}
 	mc, err := s.modelConfig(req.GetModels())
 	if err != nil {
-		return nil, err
+		return nil, errtrace.Wrap(err, "Server.RunAgent.modelConfig")
 	}
 	client, err := eino.NewClient(ctx, mc)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "init model: %v", err)
+		return nil, errtrace.GRPC(err, codes.Internal, "Server.RunAgent.NewClient", "init model")
 	}
 	instruction, sessionID, userID, agentID := s.memoryInstruction(ctx, req.GetContext())
 	disp := s.newAgentDispatcher(client, req, instruction)
 	start := time.Now()
 	res, err := disp.Run(ctx, req.GetTask(), nil)
 	if err != nil {
-		return nil, status.Errorf(codes.Unavailable, "model call failed: %v", err)
+		return nil, errtrace.GRPC(err, codes.Unavailable, "Server.RunAgent.Dispatch", "model call failed")
 	}
 	s.reviewMemories(mc, sessionID, userID, agentID, req.GetTask(), res.Content)
 	return &runtimev1.AgentResponse{
@@ -346,7 +347,7 @@ func (s *Server) streamCompletion(
 			StreamProtocol: constant.StreamProtocolGRPC,
 		}},
 	}); err != nil {
-		return err
+		return errtrace.Wrap(err, "Server.streamCompletion.emitMeta")
 	}
 
 	res, err := disp.RunStream(ctx, prompt, msgs, func(ch eino.StreamChunk) error {
@@ -365,7 +366,7 @@ func (s *Server) streamCompletion(
 				Retryable: true,
 			}},
 		})
-		return status.Errorf(codes.Unavailable, "model stream failed: %v", err)
+		return errtrace.GRPC(err, codes.Unavailable, "Server.streamCompletion.Dispatch", "model stream failed")
 	}
 
 	err = emit(&runtimev1.StreamEvent{
@@ -386,7 +387,7 @@ func (s *Server) streamCompletion(
 		}},
 	})
 	s.reviewMemories(mc, scope.sessionID, scope.userID, scope.agentID, scope.userInput, res.Content)
-	return err
+	return errtrace.Wrap(err, "Server.streamCompletion.emitDone")
 }
 
 // memScope carries per-request memory identifiers and user input for the
@@ -406,16 +407,16 @@ func (s *Server) RunStream(req *runtimev1.RunRequest, stream runtimev1.AgentRunt
 	log.Infow("run_stream", "prompt_len", len(req.GetPrompt()), "messages", len(req.GetMessages()))
 	mc, err := s.modelConfig(req.GetModels())
 	if err != nil {
-		return err
+		return errtrace.Wrap(err, "Server.RunStream.modelConfig")
 	}
 	client, err := eino.NewClient(ctx, mc)
 	if err != nil {
-		return status.Errorf(codes.Internal, "init model: %v", err)
+		return errtrace.GRPC(err, codes.Internal, "Server.RunStream.NewClient", "init model")
 	}
 	instruction, sessionID, userID, agentID := s.memoryInstruction(ctx, req.GetContext())
 	disp := s.newRunDispatcher(client, req, instruction)
-	return s.streamCompletion(ctx, traceID, req.GetPrompt(), fromProtoMessages(req.GetMessages()), mc, client, disp,
-		memScope{sessionID: sessionID, userID: userID, agentID: agentID, userInput: req.GetPrompt()}, stream.Send)
+	return errtrace.Wrap(s.streamCompletion(ctx, traceID, req.GetPrompt(), fromProtoMessages(req.GetMessages()), mc, client, disp,
+		memScope{sessionID: sessionID, userID: userID, agentID: agentID, userInput: req.GetPrompt()}, stream.Send), "Server.RunStream")
 }
 
 // RunAgentStream streams an autonomous task response.
@@ -429,16 +430,16 @@ func (s *Server) RunAgentStream(req *runtimev1.AgentRequest, stream runtimev1.Ag
 	}
 	mc, err := s.modelConfig(req.GetModels())
 	if err != nil {
-		return err
+		return errtrace.Wrap(err, "Server.RunAgentStream.modelConfig")
 	}
 	client, err := eino.NewClient(ctx, mc)
 	if err != nil {
-		return status.Errorf(codes.Internal, "init model: %v", err)
+		return errtrace.GRPC(err, codes.Internal, "Server.RunAgentStream.NewClient", "init model")
 	}
 	instruction, sessionID, userID, agentID := s.memoryInstruction(ctx, req.GetContext())
 	disp := s.newAgentDispatcher(client, req, instruction)
-	return s.streamCompletion(ctx, traceID, req.GetTask(), nil, mc, client, disp,
-		memScope{sessionID: sessionID, userID: userID, agentID: agentID, userInput: req.GetTask()}, stream.Send)
+	return errtrace.Wrap(s.streamCompletion(ctx, traceID, req.GetTask(), nil, mc, client, disp,
+		memScope{sessionID: sessionID, userID: userID, agentID: agentID, userInput: req.GetTask()}, stream.Send), "Server.RunAgentStream")
 }
 
 // Resume is not yet implemented (approval/checkpoint engine pending).

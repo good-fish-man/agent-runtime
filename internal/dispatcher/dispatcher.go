@@ -19,6 +19,7 @@ import (
 	"github.com/good-fish-man/agent-runtime/internal/prompt"
 	"github.com/good-fish-man/agent-runtime/internal/types"
 	"github.com/good-fish-man/agent-runtime/log"
+	"github.com/good-fish-man/agent-runtime/pkg/errtrace"
 
 	"github.com/cloudwego/eino/components/tool"
 )
@@ -79,7 +80,11 @@ func (d *Dispatcher) Run(ctx context.Context, userPrompt string, msgs []eino.Cha
 	d.prepareCapabilities(ctx, userPrompt, msgs)
 	instruction := d.buildInstruction()
 	msgs = d.maybeCompact(ctx, msgs)
-	return d.client.Generate(ctx, userPrompt, msgs, d.runParams(instruction))
+	result, err := d.client.Generate(ctx, userPrompt, msgs, d.runParams(instruction))
+	if err != nil {
+		return nil, errtrace.Wrap(err, "dispatcher.Run")
+	}
+	return result, nil
 }
 
 // RunStream performs a streaming orchestrated completion.
@@ -87,7 +92,11 @@ func (d *Dispatcher) RunStream(ctx context.Context, userPrompt string, msgs []ei
 	d.prepareCapabilities(ctx, userPrompt, msgs)
 	instruction := d.buildInstruction()
 	msgs = d.maybeCompact(ctx, msgs)
-	return d.client.Stream(ctx, userPrompt, msgs, d.runParams(instruction), onChunk)
+	result, err := d.client.Stream(ctx, userPrompt, msgs, d.runParams(instruction), onChunk)
+	if err != nil {
+		return nil, errtrace.Wrap(err, "dispatcher.RunStream")
+	}
+	return result, nil
 }
 
 func (d *Dispatcher) runParams(instruction string) eino.RunParams {

@@ -24,6 +24,7 @@ import (
 	"github.com/good-fish-man/agent-runtime/internal/server"
 	"github.com/good-fish-man/agent-runtime/internal/tools"
 	"github.com/good-fish-man/agent-runtime/log"
+	"github.com/good-fish-man/agent-runtime/pkg/errtrace"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -211,6 +212,9 @@ func httpStatus(err error) int {
 }
 
 func writeError(w http.ResponseWriter, err error) {
+	if sink, ok := w.(interface{ SetError(error) }); ok {
+		sink.SetError(err)
+	}
 	msg := err.Error()
 	if st, ok := status.FromError(err); ok {
 		msg = st.Message()
@@ -321,7 +325,7 @@ func serveSSE(w http.ResponseWriter, r *http.Request, run func(send func(*runtim
 		return nil
 	}
 	if err := run(send); err != nil {
-		log.ErrorwCtx(r.Context(), "http stream failed", "method", r.Method, "path", r.URL.EscapedPath(), "err", err)
+		log.ErrorwCtx(r.Context(), "http stream failed", "method", r.Method, "path", r.URL.EscapedPath(), "error_chain", errtrace.Format(err))
 		traceID, _ := r.Context().Value(log.ReqIDKey).(string)
 		_, _ = fmt.Fprintf(w, "event: %s\ndata: {\"message\":%q,\"trace_id\":%q}\n\n", constant.EventError, err.Error(), traceID)
 		flusher.Flush()

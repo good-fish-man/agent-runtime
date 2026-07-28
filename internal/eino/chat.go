@@ -12,6 +12,7 @@ import (
 
 	"github.com/good-fish-man/agent-runtime/internal/constant"
 	"github.com/good-fish-man/agent-runtime/internal/tools"
+	"github.com/good-fish-man/agent-runtime/pkg/errtrace"
 
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/adk"
@@ -180,6 +181,9 @@ func (c *Client) buildRunner(ctx context.Context, p RunParams, streaming bool) (
 		agentTools = append(agentTools, tools.AllToolsWithBasePath(p.WorkingDir)...)
 	}
 	agentTools = append(agentTools, p.ExtraTools...)
+	for i, agentTool := range agentTools {
+		agentTools[i] = tools.TraceTool(agentTool)
+	}
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:          constant.AgentName,
 		Description:   constant.AgentDescription,
@@ -209,7 +213,7 @@ func (c *Client) Generate(ctx context.Context, prompt string, msgs []ChatMessage
 	}
 	runner, err := c.buildRunner(ctx, p, false)
 	if err != nil {
-		return nil, err
+		return nil, errtrace.Wrap(err, "eino.Client.Generate.buildRunner")
 	}
 
 	events := runner.Run(ctx, messages)
@@ -217,7 +221,7 @@ func (c *Client) Generate(ctx context.Context, prompt string, msgs []ChatMessage
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, errtrace.Wrap(ctx.Err(), "eino.Client.Generate.context")
 		default:
 		}
 		event, ok := events.Next()
@@ -225,14 +229,14 @@ func (c *Client) Generate(ctx context.Context, prompt string, msgs []ChatMessage
 			break
 		}
 		if event.Err != nil {
-			return nil, fmt.Errorf("agent error: %w", event.Err)
+			return nil, errtrace.Wrap(event.Err, "eino.Client.Generate.agentEvent")
 		}
 		if event.Output == nil || event.Output.MessageOutput == nil {
 			continue
 		}
 		msg, err := event.Output.MessageOutput.GetMessage()
 		if err != nil {
-			return nil, fmt.Errorf("get message: %w", err)
+			return nil, errtrace.Wrap(err, "eino.Client.Generate.getMessage")
 		}
 		if msg == nil {
 			continue
@@ -255,7 +259,7 @@ func (c *Client) Stream(ctx context.Context, prompt string, msgs []ChatMessage, 
 	}
 	runner, err := c.buildRunner(ctx, p, true)
 	if err != nil {
-		return nil, err
+		return nil, errtrace.Wrap(err, "eino.Client.Stream.buildRunner")
 	}
 
 	events := runner.Run(ctx, messages)
@@ -263,7 +267,7 @@ func (c *Client) Stream(ctx context.Context, prompt string, msgs []ChatMessage, 
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, errtrace.Wrap(ctx.Err(), "eino.Client.Stream.context")
 		default:
 		}
 		event, ok := events.Next()
@@ -271,7 +275,7 @@ func (c *Client) Stream(ctx context.Context, prompt string, msgs []ChatMessage, 
 			break
 		}
 		if event.Err != nil {
-			return nil, fmt.Errorf("agent error: %w", event.Err)
+			return nil, errtrace.Wrap(event.Err, "eino.Client.Stream.agentEvent")
 		}
 		if event.Output == nil || event.Output.MessageOutput == nil {
 			continue
@@ -284,13 +288,13 @@ func (c *Client) Stream(ctx context.Context, prompt string, msgs []ChatMessage, 
 				continue
 			}
 			if err := c.emitDelta(mv.Message, res, onChunk); err != nil {
-				return nil, err
+				return nil, errtrace.Wrap(err, "eino.Client.Stream.emitDelta")
 			}
 			continue
 		}
 
 		if err := c.consumeStream(ctx, mv.MessageStream, res, onChunk); err != nil {
-			return nil, err
+			return nil, errtrace.Wrap(err, "eino.Client.Stream.consumeStream")
 		}
 	}
 	return res, nil
@@ -313,7 +317,7 @@ func (c *Client) consumeStream(ctx context.Context, stream *schema.StreamReader[
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return errtrace.Wrap(ctx.Err(), "eino.Client.consumeStream.context")
 		default:
 		}
 		chunk, err := stream.Recv()
@@ -321,10 +325,10 @@ func (c *Client) consumeStream(ctx context.Context, stream *schema.StreamReader[
 			if err == io.EOF {
 				return nil
 			}
-			return fmt.Errorf("stream recv: %w", err)
+			return errtrace.Wrap(err, "eino.Client.consumeStream.recv")
 		}
 		if err := c.emitDelta(chunk, res, onChunk); err != nil {
-			return err
+			return errtrace.Wrap(err, "eino.Client.consumeStream.emitDelta")
 		}
 	}
 }
