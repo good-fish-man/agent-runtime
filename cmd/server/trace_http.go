@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"net/http"
 	"strings"
 
@@ -23,6 +25,11 @@ var httpTraceResponseHeaders = []string{
 }
 
 func traceIDFromHTTP(r *http.Request) string {
+	if r != nil {
+		if value, ok := r.Context().Value(log.ReqIDKey).(string); ok && value != "" {
+			return value
+		}
+	}
 	for _, header := range httpTraceHeaderCandidates {
 		raw := strings.TrimSpace(r.Header.Get(header))
 		if raw == "" {
@@ -34,6 +41,17 @@ func traceIDFromHTTP(r *http.Request) string {
 		return raw
 	}
 	return ""
+}
+
+func ensureHTTPTraceID(r *http.Request) string {
+	if traceID := traceIDFromHTTP(r); traceID != "" {
+		return traceID
+	}
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err == nil {
+		return "art-" + hex.EncodeToString(value[:])
+	}
+	return "agent-runtime"
 }
 
 func traceIDFromTraceparent(header string) string {

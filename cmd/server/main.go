@@ -77,12 +77,12 @@ func serve(configPath string, quit <-chan os.Signal) (bool, error) {
 	if cfg.Memory.Enabled && cfg.DB.Enabled {
 		db, err := database.New(cfg.DB)
 		if err != nil {
-			log.Infof("memory disabled: database connection failed: %v", err)
+			log.Warnf("memory disabled: database connection failed: %v", err)
 		} else {
 			store := memory.NewMemStore(db)
 			if cfg.Memory.AutoMigrate {
 				if err := store.AutoMigrate(); err != nil {
-					log.Infof("memory auto-migrate failed: %v", err)
+					log.Errorf("memory auto-migrate failed: %v", err)
 				}
 			}
 			srvCfg.Store = store
@@ -122,7 +122,7 @@ func serve(configPath string, quit <-chan os.Signal) (bool, error) {
 	restartCh := make(chan struct{}, 1)
 	admin.NewHandler(configPath, cfg.Skills.ConfigPath, restartCh).Register(mux)
 
-	httpServer := &http.Server{Addr: cfg.Server.HTTPAddr, Handler: mux}
+	httpServer := &http.Server{Addr: cfg.Server.HTTPAddr, Handler: requestLogger(mux), ReadHeaderTimeout: 10 * time.Second}
 	log.Infof("HTTP gateway listening on %s", cfg.Server.HTTPAddr)
 	serverErr := make(chan error, 1)
 	log.Go(func() {
@@ -321,7 +321,9 @@ func serveSSE(w http.ResponseWriter, r *http.Request, run func(send func(*runtim
 		return nil
 	}
 	if err := run(send); err != nil {
-		_, _ = fmt.Fprintf(w, "event: %s\ndata: {\"message\":%q}\n\n", constant.EventError, err.Error())
+		log.ErrorwCtx(r.Context(), "http stream failed", "method", r.Method, "path", r.URL.EscapedPath(), "err", err)
+		traceID, _ := r.Context().Value(log.ReqIDKey).(string)
+		_, _ = fmt.Fprintf(w, "event: %s\ndata: {\"message\":%q,\"trace_id\":%q}\n\n", constant.EventError, err.Error(), traceID)
 		flusher.Flush()
 	}
 }
