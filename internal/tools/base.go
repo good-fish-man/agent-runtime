@@ -6,7 +6,7 @@ import (
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
-	"github.com/good-fish-man/agent-runtime/pkg/errtrace"
+	"github.com/good-fish-man/agent-runtime/log"
 )
 
 // ValidationResult 验证结果
@@ -64,7 +64,7 @@ func (a *Adapter) InvokableRun(ctx context.Context, input string, opts ...tool.O
 	if err == nil {
 		return result, nil
 	}
-	return result, errtrace.Wrap(err, "tool."+a.name(ctx)+".InvokableRun")
+	return result, log.WrapError(err, "tool."+a.name(ctx)+".InvokableRun")
 }
 
 func (a *Adapter) name(ctx context.Context) string {

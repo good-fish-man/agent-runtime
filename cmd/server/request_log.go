@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/good-fish-man/agent-runtime/log"
-	"github.com/good-fish-man/agent-runtime/pkg/errtrace"
 )
 
 const errorResponseLogLimit = 4 * 1024
@@ -88,7 +87,7 @@ func logHTTPCompletion(ctx context.Context, request *http.Request, writer *respo
 	}
 	kv = append(kv, "response", string(bytes.TrimSpace(writer.body.Bytes())))
 	if writer.err != nil {
-		kv = append(kv, "error_chain", errtrace.Format(writer.err))
+		kv = append(kv, "error_chain", log.FormatError(writer.err))
 	}
 	if writer.status >= http.StatusInternalServerError {
 		log.ErrorwCtx(ctx, "http request failed", kv...)

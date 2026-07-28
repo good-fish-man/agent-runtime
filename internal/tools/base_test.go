@@ -8,7 +8,7 @@ import (
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
-	"github.com/good-fish-man/agent-runtime/pkg/errtrace"
+	"github.com/good-fish-man/agent-runtime/log"
 )
 
 type failingTool struct{ cause error }
@@ -32,8 +32,8 @@ func TestTraceToolPreservesCauseAndAddsToolName(t *testing.T) {
 	if !errors.Is(err, cause) {
 		t.Fatal("tool error cause was not preserved")
 	}
-	detail := errtrace.Format(err)
-	if !strings.Contains(detail, "tool.FailingTool.InvokableRun") || !strings.Contains(detail, "internal/tools/base.go:") {
+	detail := log.FormatError(err)
+	if !strings.Contains(detail, "tool.FailingTool.InvokableRun") || !strings.Contains(detail, "base.go:") {
 		t.Fatalf("unexpected trace:\n%s", detail)
 	}
 }

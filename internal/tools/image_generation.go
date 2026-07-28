@@ -20,7 +20,7 @@ import (
 
 	"github.com/good-fish-man/agent-runtime/internal/constant"
 	"github.com/good-fish-man/agent-runtime/internal/types"
-	"github.com/good-fish-man/agent-runtime/pkg/errtrace"
+	"github.com/good-fish-man/agent-runtime/log"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
@@ -78,7 +78,7 @@ func (t *ImageGenerationTool) InvokableRun(ctx context.Context, input string, _ 
 		imageURL, err = t.generateOpenAI(ctx, request)
 	}
 	if err != nil {
-		return "", errtrace.Wrap(err, "ImageGenerationTool.InvokableRun.generate")
+		return "", log.WrapError(err, "ImageGenerationTool.InvokableRun.generate")
 	}
 	result, _ := json.Marshal(map[string]any{
 		"image_url": imageURL,
@@ -105,7 +105,7 @@ func (t *ImageGenerationTool) generateOpenAI(ctx context.Context, input imageGen
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", errtrace.Wrap(err, "ImageGenerationTool.generateOpenAI.request")
+		return "", log.WrapError(err, "ImageGenerationTool.generateOpenAI.request")
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
@@ -144,7 +144,7 @@ func (t *ImageGenerationTool) generateStability(ctx context.Context, input image
 	req.Header.Set("Authorization", "Bearer "+t.model.APIKey)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", errtrace.Wrap(err, "ImageGenerationTool.generateStability.request")
+		return "", log.WrapError(err, "ImageGenerationTool.generateStability.request")
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
@@ -166,11 +166,11 @@ func (t *ImageGenerationTool) generateDiffusers(ctx context.Context, input image
 	filename := generatedFilename(".png")
 	output := filepath.Join(GeneratedImagesDir(), filename)
 	if err := os.MkdirAll(GeneratedImagesDir(), 0o755); err != nil {
-		return "", errtrace.Wrap(err, "ImageGenerationTool.generateDiffusers.createOutputDir")
+		return "", log.WrapError(err, "ImageGenerationTool.generateDiffusers.createOutputDir")
 	}
 	if modelRuntimeMode(t.model) == constant.RuntimeModeAlwaysOn {
 		if err := sharedDiffusersWorkers.generate(ctx, modelDir, input.Prompt, input.NegativePrompt, output); err != nil {
-			return "", errtrace.Wrap(err, "ImageGenerationTool.generateDiffusers.worker")
+			return "", log.WrapError(err, "ImageGenerationTool.generateDiffusers.worker")
 		}
 		return generatedPublicURL(filename), nil
 	}

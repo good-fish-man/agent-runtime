@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/good-fish-man/agent-runtime/log"
-	"github.com/good-fish-man/agent-runtime/pkg/errtrace"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -72,7 +71,7 @@ func logGRPCCompletion(ctx context.Context, method string, elapsed time.Duration
 		log.InfowCtx(ctx, "grpc request completed", kv...)
 		return
 	}
-	kv = append(kv, "error_chain", errtrace.Format(err))
+	kv = append(kv, "error_chain", log.FormatError(err))
 	if code == codes.InvalidArgument || code == codes.NotFound || code == codes.Unauthenticated || code == codes.PermissionDenied {
 		log.WarnwCtx(ctx, "grpc request rejected", kv...)
 		return
