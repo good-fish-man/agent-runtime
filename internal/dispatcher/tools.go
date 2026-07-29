@@ -22,6 +22,9 @@ func (d *Dispatcher) buildTools(ctx context.Context, relevanceText string) ([]to
 	if imageModel, ok := d.req.Models["image"]; ok && imageModel.Name != "" {
 		extra = append(extra, tools.NewImageGenerationTool(imageModel))
 	}
+	if videoModel, ok := d.req.Models["video"]; ok && videoModel.Name != "" {
+		extra = append(extra, tools.NewVideoGenerationTool(videoModel))
+	}
 
 	// Sub-agent orchestration tools (spawn / delegate / parallel / manage).
 	if len(d.req.SubAgents) > 0 {

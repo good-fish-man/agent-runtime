@@ -23,6 +23,7 @@ const (
 	AgentRuntime_RunStream_FullMethodName      = "/agent.runtime.v1.AgentRuntime/RunStream"
 	AgentRuntime_RunAgent_FullMethodName       = "/agent.runtime.v1.AgentRuntime/RunAgent"
 	AgentRuntime_RunAgentStream_FullMethodName = "/agent.runtime.v1.AgentRuntime/RunAgentStream"
+	AgentRuntime_GenerateMedia_FullMethodName  = "/agent.runtime.v1.AgentRuntime/GenerateMedia"
 	AgentRuntime_Resume_FullMethodName         = "/agent.runtime.v1.AgentRuntime/Resume"
 	AgentRuntime_Stop_FullMethodName           = "/agent.runtime.v1.AgentRuntime/Stop"
 	AgentRuntime_HealthCheck_FullMethodName    = "/agent.runtime.v1.AgentRuntime/HealthCheck"
@@ -40,6 +41,7 @@ type AgentRuntimeClient interface {
 	RunStream(ctx context.Context, in *RunRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StreamEvent], error)
 	RunAgent(ctx context.Context, in *AgentRequest, opts ...grpc.CallOption) (*AgentResponse, error)
 	RunAgentStream(ctx context.Context, in *AgentRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StreamEvent], error)
+	GenerateMedia(ctx context.Context, in *MediaGenerationRequest, opts ...grpc.CallOption) (*MediaGenerationResponse, error)
 	Resume(ctx context.Context, in *ResumeRequest, opts ...grpc.CallOption) (*ResumeResponse, error)
 	Stop(ctx context.Context, in *StopRequest, opts ...grpc.CallOption) (*StopResponse, error)
 	HealthCheck(ctx context.Context, in *HealthCheckRequest, opts ...grpc.CallOption) (*HealthCheckResponse, error)
@@ -111,6 +113,16 @@ func (c *agentRuntimeClient) RunAgentStream(ctx context.Context, in *AgentReques
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AgentRuntime_RunAgentStreamClient = grpc.ServerStreamingClient[StreamEvent]
 
+func (c *agentRuntimeClient) GenerateMedia(ctx context.Context, in *MediaGenerationRequest, opts ...grpc.CallOption) (*MediaGenerationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MediaGenerationResponse)
+	err := c.cc.Invoke(ctx, AgentRuntime_GenerateMedia_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *agentRuntimeClient) Resume(ctx context.Context, in *ResumeRequest, opts ...grpc.CallOption) (*ResumeResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ResumeResponse)
@@ -153,6 +165,7 @@ type AgentRuntimeServer interface {
 	RunStream(*RunRequest, grpc.ServerStreamingServer[StreamEvent]) error
 	RunAgent(context.Context, *AgentRequest) (*AgentResponse, error)
 	RunAgentStream(*AgentRequest, grpc.ServerStreamingServer[StreamEvent]) error
+	GenerateMedia(context.Context, *MediaGenerationRequest) (*MediaGenerationResponse, error)
 	Resume(context.Context, *ResumeRequest) (*ResumeResponse, error)
 	Stop(context.Context, *StopRequest) (*StopResponse, error)
 	HealthCheck(context.Context, *HealthCheckRequest) (*HealthCheckResponse, error)
@@ -177,6 +190,9 @@ func (UnimplementedAgentRuntimeServer) RunAgent(context.Context, *AgentRequest) 
 }
 func (UnimplementedAgentRuntimeServer) RunAgentStream(*AgentRequest, grpc.ServerStreamingServer[StreamEvent]) error {
 	return status.Errorf(codes.Unimplemented, "method RunAgentStream not implemented")
+}
+func (UnimplementedAgentRuntimeServer) GenerateMedia(context.Context, *MediaGenerationRequest) (*MediaGenerationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GenerateMedia not implemented")
 }
 func (UnimplementedAgentRuntimeServer) Resume(context.Context, *ResumeRequest) (*ResumeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Resume not implemented")
@@ -266,6 +282,24 @@ func _AgentRuntime_RunAgentStream_Handler(srv interface{}, stream grpc.ServerStr
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AgentRuntime_RunAgentStreamServer = grpc.ServerStreamingServer[StreamEvent]
 
+func _AgentRuntime_GenerateMedia_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MediaGenerationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentRuntimeServer).GenerateMedia(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentRuntime_GenerateMedia_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentRuntimeServer).GenerateMedia(ctx, req.(*MediaGenerationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AgentRuntime_Resume_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ResumeRequest)
 	if err := dec(in); err != nil {
@@ -334,6 +368,10 @@ var AgentRuntime_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RunAgent",
 			Handler:    _AgentRuntime_RunAgent_Handler,
+		},
+		{
+			MethodName: "GenerateMedia",
+			Handler:    _AgentRuntime_GenerateMedia_Handler,
 		},
 		{
 			MethodName: "Resume",

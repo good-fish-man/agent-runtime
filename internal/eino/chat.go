@@ -170,6 +170,14 @@ func finishReasonOf(m *schema.Message, fallback string) string {
 	return fallback
 }
 
+func isUserVisibleMessage(m *schema.Message) bool {
+	if m == nil {
+		return false
+	}
+	return m.Role == schema.Assistant ||
+		(m.Role == schema.Tool && (m.ToolName == tools.GenerateImageToolName || m.ToolName == tools.GenerateVideoToolName))
+}
+
 // buildRunner constructs an ADK ChatModelAgent + Runner for this client.
 func (c *Client) buildRunner(ctx context.Context, p RunParams, streaming bool) (*adk.Runner, error) {
 	maxIter := p.MaxIterations
@@ -193,6 +201,10 @@ func (c *Client) buildRunner(ctx context.Context, p RunParams, streaming bool) (
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
 				Tools: agentTools,
+			},
+			ReturnDirectly: map[string]bool{
+				tools.GenerateImageToolName: true,
+				tools.GenerateVideoToolName: true,
 			},
 		},
 	})
@@ -241,11 +253,22 @@ func (c *Client) Generate(ctx context.Context, prompt string, msgs []ChatMessage
 		if msg == nil {
 			continue
 		}
-		res.Content = msg.Content
+		// Assistant text and the safe, direct GenerateImage Markdown are visible.
+		// Other tool results may contain raw JSON or command output and stay hidden.
+		if isUserVisibleMessage(msg) {
+			res.Content = msg.Content
+		}
 		res.FinishReason = finishReasonOf(msg, res.FinishReason)
 		if u := usageOf(msg); u.TotalTokens > 0 || u.PromptTokens > 0 || u.CompletionTokens > 0 {
 			res.Usage = u
 		}
+	}
+	content, handled, err := executeTextToolMarkup(ctx, res.Content, p.ExtraTools)
+	if err != nil {
+		return nil, log.WrapError(err, "eino.Client.Generate.textToolCall")
+	}
+	if handled {
+		res.Content = content
 	}
 	return res, nil
 }
@@ -264,6 +287,7 @@ func (c *Client) Stream(ctx context.Context, prompt string, msgs []ChatMessage, 
 
 	events := runner.Run(ctx, messages)
 	res := &Result{FinishReason: "stop"}
+	streamFilter := newToolMarkupStreamFilter(onChunk)
 	for {
 		select {
 		case <-ctx.Done():
@@ -287,15 +311,32 @@ func (c *Client) Stream(ctx context.Context, prompt string, msgs []ChatMessage, 
 			if mv.Message == nil {
 				continue
 			}
-			if err := c.emitDelta(mv.Message, res, onChunk); err != nil {
+			// Only assistant text and the safe, direct GenerateImage Markdown are
+			// visible. Keep metadata from all other tool messages without emitting
+			// their raw results.
+			if !isUserVisibleMessage(mv.Message) {
+				res.FinishReason = finishReasonOf(mv.Message, res.FinishReason)
+				if u := usageOf(mv.Message); u.TotalTokens > 0 || u.PromptTokens > 0 || u.CompletionTokens > 0 {
+					res.Usage = u
+				}
+				continue
+			}
+			if err := c.emitDelta(mv.Message, res, streamFilter.write); err != nil {
 				return nil, log.WrapError(err, "eino.Client.Stream.emitDelta")
 			}
 			continue
 		}
 
-		if err := c.consumeStream(ctx, mv.MessageStream, res, onChunk); err != nil {
+		if err := c.consumeStream(ctx, mv.MessageStream, res, streamFilter.write); err != nil {
 			return nil, log.WrapError(err, "eino.Client.Stream.consumeStream")
 		}
+	}
+	content, handled, err := streamFilter.finish(ctx, p.ExtraTools)
+	if err != nil {
+		return nil, log.WrapError(err, "eino.Client.Stream.textToolCall")
+	}
+	if handled {
+		res.Content = content
 	}
 	return res, nil
 }

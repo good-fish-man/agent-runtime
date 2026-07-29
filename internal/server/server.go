@@ -17,6 +17,8 @@ import (
 	"github.com/good-fish-man/agent-runtime/internal/dispatcher"
 	"github.com/good-fish-man/agent-runtime/internal/eino"
 	"github.com/good-fish-man/agent-runtime/internal/memory"
+	"github.com/good-fish-man/agent-runtime/internal/tools"
+	"github.com/good-fish-man/agent-runtime/internal/types"
 	"github.com/good-fish-man/agent-runtime/log"
 
 	"google.golang.org/grpc/codes"
@@ -124,6 +126,16 @@ func fromProtoModel(m *runtimev1.ModelConfig) eino.ModelConfig {
 		MaxTokens:   int(m.GetMaxTokens()),
 		TopP:        m.GetTopP(),
 		ExtraFields: protoExtraFields(m),
+	}
+}
+
+func fromProtoToolModel(m *runtimev1.ModelConfig) types.ModelConfig {
+	if m == nil {
+		return types.ModelConfig{}
+	}
+	return types.ModelConfig{
+		Provider: m.GetProvider(), Name: m.GetName(), APIKey: m.GetApiKey(), APIBase: m.GetApiBase(),
+		Temperature: m.GetTemperature(), MaxTokens: int(m.GetMaxTokens()), TopP: m.GetTopP(), ExtraFields: protoExtraFields(m),
 	}
 }
 
@@ -305,6 +317,46 @@ func (s *Server) RunAgent(ctx context.Context, req *runtimev1.AgentRequest) (*ru
 			CompletionTokens: int32(res.Usage.CompletionTokens),
 		},
 	}, nil
+}
+
+// GenerateMedia invokes a user-selected media model directly, without an LLM
+// deciding whether or how to call the model.
+func (s *Server) GenerateMedia(ctx context.Context, req *runtimev1.MediaGenerationRequest) (*runtimev1.MediaGenerationResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "media request is required")
+	}
+	ctx, traceID, release := s.bindTrace(ctx, req.GetTraceId())
+	defer release()
+	if req.GetModel() == nil || strings.TrimSpace(req.GetModel().GetName()) == "" {
+		return nil, status.Error(codes.InvalidArgument, "media model is required")
+	}
+	if operation := strings.ToLower(strings.TrimSpace(req.GetOperation())); operation != "" && operation != "generate" {
+		return nil, status.Errorf(codes.InvalidArgument, "unsupported media operation %q", operation)
+	}
+
+	model := fromProtoToolModel(req.GetModel())
+	response := &runtimev1.MediaGenerationResponse{MediaType: strings.ToLower(req.GetMediaType()), TraceId: traceID}
+	switch response.MediaType {
+	case "image":
+		url, err := tools.GenerateImage(ctx, model, tools.ImageGenerationRequest{
+			Prompt: req.GetPrompt(), NegativePrompt: req.GetNegativePrompt(), SourceURL: req.GetSourceUrl(), Size: req.GetSize(), Quality: req.GetQuality(),
+		})
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "generate image: %v", err)
+		}
+		response.MediaUrl, response.MimeType = url, "image/png"
+	case "video":
+		result, err := tools.GenerateVideo(ctx, model, tools.VideoGenerationRequest{
+			Prompt: req.GetPrompt(), SourceURL: req.GetSourceUrl(), Size: req.GetSize(), DurationSeconds: int(req.GetDurationSeconds()),
+		})
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "generate video: %v", err)
+		}
+		response.MediaUrl, response.MimeType, response.ProviderJobId = result.URL, "video/mp4", result.ProviderJobID
+	default:
+		return nil, status.Errorf(codes.InvalidArgument, "unsupported media type %q", response.MediaType)
+	}
+	return response, nil
 }
 
 // HealthCheck reports serving status.

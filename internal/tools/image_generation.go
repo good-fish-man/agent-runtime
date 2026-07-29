@@ -28,9 +28,12 @@ import (
 
 type ImageGenerationTool struct{ model types.ModelConfig }
 
-type imageGenerationInput struct {
+const GenerateImageToolName = "GenerateImage"
+
+type ImageGenerationRequest struct {
 	Prompt         string `json:"prompt"`
 	NegativePrompt string `json:"negative_prompt,omitempty"`
+	SourceURL      string `json:"source_url,omitempty"`
 	Size           string `json:"size,omitempty"`
 	Quality        string `json:"quality,omitempty"`
 }
@@ -39,10 +42,15 @@ func NewImageGenerationTool(model types.ModelConfig) *ImageGenerationTool {
 	return &ImageGenerationTool{model: model}
 }
 
+// GenerateImage invokes an image model directly without involving a chat model.
+func GenerateImage(ctx context.Context, model types.ModelConfig, request ImageGenerationRequest) (string, error) {
+	return NewImageGenerationTool(model).generate(ctx, request)
+}
+
 func (t *ImageGenerationTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
-		Name: "GenerateImage",
-		Desc: "Generate an image with the Agent's bound image model. Use this whenever the user asks to draw, design, render, illustrate, or generate an image. Return the markdown field from the tool result to the user unchanged.",
+		Name: GenerateImageToolName,
+		Desc: "Generate an image with the Agent's bound image model. Use this whenever the user asks to draw, design, render, illustrate, or generate an image. The successful tool result is a Markdown image that is returned directly to the user. If image generation fails, do NOT invent or fabricate an image URL.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"prompt":          {Type: schema.String, Desc: "Detailed image generation prompt", Required: true},
 			"negative_prompt": {Type: schema.String, Desc: "Elements to avoid"},
@@ -53,10 +61,24 @@ func (t *ImageGenerationTool) Info(context.Context) (*schema.ToolInfo, error) {
 }
 
 func (t *ImageGenerationTool) InvokableRun(ctx context.Context, input string, _ ...tool.Option) (string, error) {
-	var request imageGenerationInput
+	var request ImageGenerationRequest
 	if err := json.Unmarshal([]byte(input), &request); err != nil {
 		return "", fmt.Errorf("invalid image request: %w", err)
 	}
+	if strings.TrimSpace(request.Prompt) == "" {
+		return "", fmt.Errorf("prompt is required")
+	}
+	if request.Size == "" {
+		request.Size = "1024x1024"
+	}
+	imageURL, err := t.generate(ctx, request)
+	if err != nil {
+		return "", log.WrapError(err, "ImageGenerationTool.InvokableRun.generate")
+	}
+	return fmt.Sprintf("![Generated image](%s)", imageURL), nil
+}
+
+func (t *ImageGenerationTool) generate(ctx context.Context, request ImageGenerationRequest) (string, error) {
 	if strings.TrimSpace(request.Prompt) == "" {
 		return "", fmt.Errorf("prompt is required")
 	}
@@ -69,6 +91,20 @@ func (t *ImageGenerationTool) InvokableRun(ctx context.Context, input string, _ 
 	provider := strings.ToLower(strings.ReplaceAll(t.model.Provider, " ", ""))
 	var imageURL string
 	var err error
+	if request.SourceURL != "" {
+		switch provider {
+		case constant.ProviderDiffusers:
+			imageURL, err = t.editDiffusers(ctx, request)
+		case "openai":
+			imageURL, err = t.editOpenAI(ctx, request)
+		default:
+			return "", fmt.Errorf("provider %s does not support image-to-image through this adapter", t.model.Provider)
+		}
+		if err != nil {
+			return "", err
+		}
+		return imageURL, nil
+	}
 	switch provider {
 	case constant.ProviderDiffusers:
 		imageURL, err = t.generateDiffusers(ctx, request)
@@ -78,17 +114,12 @@ func (t *ImageGenerationTool) InvokableRun(ctx context.Context, input string, _ 
 		imageURL, err = t.generateOpenAI(ctx, request)
 	}
 	if err != nil {
-		return "", log.WrapError(err, "ImageGenerationTool.InvokableRun.generate")
+		return "", err
 	}
-	result, _ := json.Marshal(map[string]any{
-		"image_url": imageURL,
-		"markdown":  fmt.Sprintf("![Generated image](%s)", imageURL),
-		"prompt":    request.Prompt,
-	})
-	return string(result), nil
+	return imageURL, nil
 }
 
-func (t *ImageGenerationTool) generateOpenAI(ctx context.Context, input imageGenerationInput) (string, error) {
+func (t *ImageGenerationTool) generateOpenAI(ctx context.Context, input ImageGenerationRequest) (string, error) {
 	endpoint := strings.TrimRight(t.model.APIBase, "/")
 	if !strings.HasSuffix(endpoint, "/images/generations") {
 		endpoint += "/images/generations"
@@ -112,6 +143,50 @@ func (t *ImageGenerationTool) generateOpenAI(ctx context.Context, input imageGen
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("image API returned %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
 	}
+	return parseOpenAIImageResponse(data)
+}
+
+func (t *ImageGenerationTool) editOpenAI(ctx context.Context, input ImageGenerationRequest) (string, error) {
+	image, err := fetchSourceImage(ctx, input.SourceURL)
+	if err != nil {
+		return "", err
+	}
+	endpoint := strings.TrimRight(t.model.APIBase, "/")
+	if !strings.HasSuffix(endpoint, "/images/edits") {
+		endpoint += "/images/edits"
+	}
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("image", "source.png")
+	if err != nil {
+		return "", err
+	}
+	if _, err := part.Write(image); err != nil {
+		return "", err
+	}
+	_ = writer.WriteField("model", t.model.Name)
+	_ = writer.WriteField("prompt", input.Prompt)
+	_ = writer.WriteField("size", input.Size)
+	_ = writer.Close()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &body)
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	setBearer(request, t.model.APIKey)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return "", log.WrapError(err, "ImageGenerationTool.editOpenAI.request")
+	}
+	defer response.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(response.Body, 32<<20))
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return "", fmt.Errorf("image edit API returned %d: %s", response.StatusCode, strings.TrimSpace(string(data)))
+	}
+	return parseOpenAIImageResponse(data)
+}
+
+func parseOpenAIImageResponse(data []byte) (string, error) {
 	var result struct {
 		Data []struct {
 			URL     string `json:"url"`
@@ -131,7 +206,30 @@ func (t *ImageGenerationTool) generateOpenAI(ctx context.Context, input imageGen
 	return saveGeneratedImage(decoded, ".png")
 }
 
-func (t *ImageGenerationTool) generateStability(ctx context.Context, input imageGenerationInput) (string, error) {
+func fetchSourceImage(ctx context.Context, sourceURL string) ([]byte, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("invalid source image URL: %w", err)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("download source image: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, fmt.Errorf("download source image returned %d", response.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, 32<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read source image: %w", err)
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("source image is empty")
+	}
+	return data, nil
+}
+
+func (t *ImageGenerationTool) generateStability(ctx context.Context, input ImageGenerationRequest) (string, error) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	_ = writer.WriteField("prompt", input.Prompt)
@@ -154,7 +252,7 @@ func (t *ImageGenerationTool) generateStability(ctx context.Context, input image
 	return saveGeneratedImage(data, ".png")
 }
 
-func (t *ImageGenerationTool) generateDiffusers(ctx context.Context, input imageGenerationInput) (string, error) {
+func (t *ImageGenerationTool) generateDiffusers(ctx context.Context, input ImageGenerationRequest) (string, error) {
 	python := diffusersPython()
 	modelDir := filepath.Join(athenaDir(), "models", "diffusers", strings.ReplaceAll(t.model.Name, "/", "--"))
 	if _, err := os.Stat(filepath.Join(modelDir, ".athena_complete")); err != nil {
@@ -188,6 +286,36 @@ result.save(output)`
 	command := exec.CommandContext(ctx, python, "-c", script, modelDir, input.Prompt, input.NegativePrompt, output)
 	if data, err := command.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("local image generation failed: %v: %s", err, strings.TrimSpace(string(data)))
+	}
+	return generatedPublicURL(filename), nil
+}
+
+func (t *ImageGenerationTool) editDiffusers(ctx context.Context, input ImageGenerationRequest) (string, error) {
+	python := diffusersPython()
+	modelDir := filepath.Join(athenaDir(), "models", "diffusers", strings.ReplaceAll(t.model.Name, "/", "--"))
+	if _, err := os.Stat(filepath.Join(modelDir, ".athena_complete")); err != nil {
+		return "", fmt.Errorf("local image model is not downloaded: %s", t.model.Name)
+	}
+	filename := generatedFilename(".png")
+	output := filepath.Join(GeneratedImagesDir(), filename)
+	if err := os.MkdirAll(GeneratedImagesDir(), 0o755); err != nil {
+		return "", err
+	}
+	script := `import io, sys, torch, urllib.request
+from PIL import Image
+from diffusers import AutoPipelineForImage2Image
+model, source, prompt, negative, output = sys.argv[1:6]
+has_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+dtype = torch.float16 if torch.cuda.is_available() or has_mps else torch.float32
+pipe = AutoPipelineForImage2Image.from_pretrained(model, torch_dtype=dtype, local_files_only=True, use_safetensors=True)
+if torch.cuda.is_available(): pipe.to("cuda")
+elif has_mps: pipe.to("mps")
+with urllib.request.urlopen(source, timeout=30) as response: image = Image.open(io.BytesIO(response.read())).convert("RGB")
+result = pipe(prompt=prompt, image=image, negative_prompt=negative or None).images[0]
+result.save(output)`
+	command := exec.CommandContext(ctx, python, "-c", script, modelDir, input.SourceURL, input.Prompt, input.NegativePrompt, output)
+	if data, err := command.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("local image editing failed: %v: %s", err, strings.TrimSpace(string(data)))
 	}
 	return generatedPublicURL(filename), nil
 }

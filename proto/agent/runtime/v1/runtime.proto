@@ -15,6 +15,7 @@ service AgentRuntime {
   rpc RunStream(RunRequest) returns (stream StreamEvent);
   rpc RunAgent(AgentRequest) returns (AgentResponse);
   rpc RunAgentStream(AgentRequest) returns (stream StreamEvent);
+  rpc GenerateMedia(MediaGenerationRequest) returns (MediaGenerationResponse);
   rpc Resume(ResumeRequest) returns (ResumeResponse);
   rpc Stop(StopRequest) returns (StopResponse);
   rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
@@ -118,6 +119,28 @@ message AgentResponse {
   ResponseMetadata metadata = 5;
   string error = 6;
   string trace_id = 7;
+}
+
+message MediaGenerationRequest {
+  ModelConfig model = 1;
+  string media_type = 2;
+  string operation = 3;
+  string prompt = 4;
+  string negative_prompt = 5;
+  string source_url = 6;
+  string size = 7;
+  string quality = 8;
+  int32 duration_seconds = 9;
+  string request_id = 10;
+  string trace_id = 11;
+}
+
+message MediaGenerationResponse {
+  string media_url = 1;
+  string media_type = 2;
+  string mime_type = 3;
+  string provider_job_id = 4;
+  string trace_id = 5;
 }
 
 message ResumeRequest {

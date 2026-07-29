@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -36,12 +35,8 @@ func TestImageGenerationToolOpenAIURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(result), &payload); err != nil {
-		t.Fatal(err)
-	}
-	if payload["image_url"] != "https://example.com/generated.png" || !strings.Contains(payload["markdown"].(string), "generated.png") {
-		t.Fatalf("result = %s", result)
+	if result != "![Generated image](https://example.com/generated.png)" {
+		t.Fatalf("result = %q", result)
 	}
 }
 
