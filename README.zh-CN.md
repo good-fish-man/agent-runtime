@@ -135,6 +135,7 @@ skills:
 | `GRPC_ADDR`、`HTTP_ADDR` | 监听地址 |
 | `DEFAULT_MODEL`、`DEFAULT_API_KEY`、`DEFAULT_API_BASE` | 兜底模型配置 |
 | `SKILLS_DIR`、`GLOBAL_SKILLS_DIR`、`SKILLS_CONFIG_PATH` | Skills 路径 |
+| `ATHENA_AGENT_BROWSER_BIN` | Athena Launcher 安装并校验的 `agent-browser` 可执行文件 |
 | `SANDBOX_IMAGE` | 默认沙箱镜像 |
 
 不要提交 API Key。完整平台中，模型凭据由 `agent-runtime-client` 解析，只通过服务间请求传递给 Runtime。
@@ -144,6 +145,8 @@ skills:
 Runtime 可按需选择 `Glob`、`Grep`、`Read`、`Edit`、`Write`、`Bash`、联网搜索、计划、任务和提问工具。公开发行包包含浏览器自动化、CSV 分析、MarkItDown、S3 上传和 Skill 创建等 Skills。仓库中的 PowerPoint Skill 受第三方条款限制，不会进入公开发行包。
 
 Tools 和 Skills 会根据当前描述与最近上下文进行筛选。文件工具的访问范围由请求中的 `project_dir` 限定。
+
+需要登录的网页由 `BrowserLogin`、`BrowserRead` 和 `BrowserClose` 处理。`BrowserLogin` 会打开用户可见的隔离浏览器会话，用户在浏览器中完成密码、验证码、二次验证或扫码登录。账号密码和 Cookie 不会作为工具参数传输。Athena Launcher 会安装原生浏览器 CLI；独立开发环境可以自行安装 `agent-browser` 或设置 `ATHENA_AGENT_BROWSER_BIN`。
 
 ## 开发
 

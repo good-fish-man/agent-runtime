@@ -39,6 +39,15 @@ func TestIsUserVisibleMessage(t *testing.T) {
 			),
 			want: true,
 		},
+		{
+			name: "browser authentication",
+			message: schema.ToolMessage(
+				`{"type":"browser_authentication","status":"authentication_required"}`,
+				"call-browser-login",
+				schema.WithToolName(tools.BrowserLoginToolName),
+			),
+			want: true,
+		},
 		{name: "user", message: schema.UserMessage("hello"), want: false},
 	}
 

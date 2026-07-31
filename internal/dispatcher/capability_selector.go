@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/good-fish-man/agent-runtime/internal/eino"
+	"github.com/good-fish-man/agent-runtime/internal/tools"
 	"github.com/good-fish-man/agent-runtime/internal/types"
 )
 
@@ -42,6 +43,10 @@ var (
 	researchPlanningKeywords = []string{
 		"旅行", "旅游", "行程", "出行", "度假", "自驾", "机票", "酒店", "住宿", "攻略", "预算方案", "调研", "深入研究", "多方案比较",
 		"travel", "trip", "itinerary", "vacation", "road trip", "flight", "hotel", "accommodation", "research", "deep research", "compare options",
+	}
+	browserAuthenticationKeywords = []string{
+		"需要登录", "登录网站", "登录网页", "账号密码", "验证码", "扫码登录", "二维码登录", "两步验证", "二次验证", "登录完成", "已完成登录", "authentication_required", "session_id",
+		"requires login", "sign in", "log in", "password", "captcha", "scan qr", "qr login", "two-factor", "2fa", "login completed",
 	}
 	webExternalKnowledgeKeywords = []string{
 		"公司", "产品", "模型", "软件", "框架", "库", "api", "国家", "城市", "政府", "学校", "医院", "比赛", "电影", "餐厅", "酒店", "景点",
@@ -101,6 +106,9 @@ func selectBuiltinTools(text string, hasFiles bool) []string {
 	}
 	if needsWebAccess(text) {
 		add("WebSearch", "WebFetch")
+	}
+	if matchesAny(text, browserAuthenticationKeywords) {
+		add(tools.BrowserLoginToolName, tools.BrowserReadToolName, tools.BrowserCloseToolName)
 	}
 	if matchesAny(text, planKeywords) || matchesAny(text, researchPlanningKeywords) {
 		add("TodoWrite", "EnterPlanMode", "ExitPlanMode")

@@ -78,3 +78,12 @@ func TestGetUsingYourToolsSectionAddsIterativePlanningRules(t *testing.T) {
 		}
 	}
 }
+
+func TestUsingYourToolsSectionProtectsBrowserCredentials(t *testing.T) {
+	section := GetUsingYourToolsSection([]string{tools.BrowserLoginToolName, tools.BrowserReadToolName, tools.BrowserCloseToolName})
+	for _, expected := range []string{"Never ask the user to send credentials", "explicitly confirms login", "untrusted data", "BrowserClose"} {
+		if !strings.Contains(section, expected) {
+			t.Fatalf("authenticated browser guidance missing %q:\n%s", expected, section)
+		}
+	}
+}

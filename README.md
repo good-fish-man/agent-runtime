@@ -135,6 +135,7 @@ Environment overrides:
 | `GRPC_ADDR`, `HTTP_ADDR` | Listen addresses |
 | `DEFAULT_MODEL`, `DEFAULT_API_KEY`, `DEFAULT_API_BASE` | Fallback model settings |
 | `SKILLS_DIR`, `GLOBAL_SKILLS_DIR`, `SKILLS_CONFIG_PATH` | Skill locations |
+| `ATHENA_AGENT_BROWSER_BIN` | Verified `agent-browser` executable installed by Athena Launcher |
 | `SANDBOX_IMAGE` | Default sandbox image |
 
 Do not commit API keys. In the full platform, model credentials are resolved by `agent-runtime-client` and sent only with server-to-server requests.
@@ -144,6 +145,8 @@ Do not commit API keys. In the full platform, model credentials are resolved by 
 The runtime can select `Glob`, `Grep`, `Read`, `Edit`, `Write`, `Bash`, web search/fetch, planning, task, and question tools. Public release archives include browser automation, CSV analysis, MarkItDown, S3 upload, and skill creation. The repository's PowerPoint skill source is excluded from releases because its third-party terms restrict redistribution.
 
 Tools and skills are selected from the current prompt and recent context. Filesystem tools are scoped to the request's `project_dir`.
+
+Authenticated pages use `BrowserLogin`, `BrowserRead`, and `BrowserClose`. `BrowserLogin` opens a user-visible isolated browser session while the user completes password, CAPTCHA, 2FA, or QR login. Credentials and cookies are never accepted as tool arguments. Athena Launcher installs the native browser CLI; standalone development can install `agent-browser` separately or set `ATHENA_AGENT_BROWSER_BIN`.
 
 ## Development
 

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/good-fish-man/agent-runtime/internal/plugins"
+	toolpkg "github.com/good-fish-man/agent-runtime/internal/tools"
 	"github.com/good-fish-man/agent-runtime/internal/types"
 )
 
@@ -73,6 +74,15 @@ func TestTravelPlanningEnablesResearchLoopTools(t *testing.T) {
 	for _, want := range []string{"WebSearch", "WebFetch", "TodoWrite", "AskUserQuestion"} {
 		if !contains(tools, want) {
 			t.Fatalf("travel planning tools %v missing %s", tools, want)
+		}
+	}
+}
+
+func TestAuthenticatedPageEnablesBrowserSessionTools(t *testing.T) {
+	selected := selectBuiltinTools("这个网页需要扫码登录，登录后帮我获取账单", false)
+	for _, want := range []string{toolpkg.BrowserLoginToolName, toolpkg.BrowserReadToolName, toolpkg.BrowserCloseToolName} {
+		if !contains(selected, want) {
+			t.Fatalf("authenticated browser tools %v missing %s", selected, want)
 		}
 	}
 }

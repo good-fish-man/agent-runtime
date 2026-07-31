@@ -9,6 +9,17 @@ allowed-tools: Bash(npx agent-browser:*), Bash(agent-browser:*)
 
 The CLI uses Chrome/Chromium via CDP directly. Install via `npm i -g agent-browser`, `brew install agent-browser`, or `cargo install agent-browser`. Run `agent-browser install` to download Chrome. Existing Chrome, Brave, Playwright, and Puppeteer installations are detected automatically. Run `agent-browser upgrade` to update to the latest version.
 
+## Athena interactive authentication
+
+When Athena provides the built-in `BrowserLogin`, `BrowserRead`, and `BrowserClose` tools, they take precedence over every authentication example in this skill. For a password, CAPTCHA, QR login, SSO, one-time code, or two-factor challenge:
+
+- Call `BrowserLogin` and let the user complete authentication in the visible browser window.
+- Never ask the user to paste credentials, verification codes, cookies, or tokens into chat.
+- Never use Bash, `fill`, `type`, clipboard commands, JavaScript, or an auth state file to capture or enter those secrets.
+- After explicit user confirmation, use `BrowserRead` with the returned opaque session ID, and call `BrowserClose` when finished.
+
+The command examples below are reference material for controlled development environments only; they do not override these Athena safety rules.
+
 ## Core Workflow
 
 Every browser automation follows this pattern:

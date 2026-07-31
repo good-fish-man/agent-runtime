@@ -175,7 +175,7 @@ func isUserVisibleMessage(m *schema.Message) bool {
 		return false
 	}
 	return m.Role == schema.Assistant ||
-		(m.Role == schema.Tool && (m.ToolName == tools.GenerateImageToolName || m.ToolName == tools.GenerateVideoToolName || m.ToolName == tools.AskUserQuestionToolName))
+		(m.Role == schema.Tool && (m.ToolName == tools.GenerateImageToolName || m.ToolName == tools.GenerateVideoToolName || m.ToolName == tools.AskUserQuestionToolName || m.ToolName == tools.BrowserLoginToolName))
 }
 
 // buildRunner constructs an ADK ChatModelAgent + Runner for this client.
@@ -206,6 +206,7 @@ func (c *Client) buildRunner(ctx context.Context, p RunParams, streaming bool) (
 				tools.GenerateImageToolName:   true,
 				tools.GenerateVideoToolName:   true,
 				tools.AskUserQuestionToolName: true,
+				tools.BrowserLoginToolName:    true,
 			},
 		},
 	})
