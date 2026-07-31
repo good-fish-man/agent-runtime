@@ -26,7 +26,7 @@ var (
 		"网站", "网址", "url", "http://", "https://", "web", "search", "search online", "look up", "browse", "website", "source", "citation", "official docs", "verify",
 	}
 	webTemporalKeywords = []string{
-		"最新", "现任", "目前", "近期", "最近", "今天", "昨日", "昨天", "本周", "本月", "今年", "截至", "实时", "刚刚", "现在还有", "是否仍然",
+		"最新", "现任", "目前", "近期", "最近", "今天", "昨日", "昨天", "明天", "下周", "下个月", "本周", "本月", "今年", "截至", "实时", "刚刚", "现在还有", "是否仍然",
 		"latest", "current", "currently", "recent", "recently", "today", "yesterday", "this week", "this month", "this year", "as of", "real-time", "still available",
 	}
 	webMutableFactKeywords = []string{
@@ -38,6 +38,10 @@ var (
 	webRecommendationKeywords = []string{
 		"推荐", "值得买吗", "哪个好", "哪家", "哪里吃", "哪里住", "旅游攻略", "购买建议", "选型", "对比一下",
 		"recommend", "recommendation", "best", "worth buying", "where to eat", "where to stay", "travel plan", "buying guide", "compare products",
+	}
+	researchPlanningKeywords = []string{
+		"旅行", "旅游", "行程", "出行", "度假", "自驾", "机票", "酒店", "住宿", "攻略", "预算方案", "调研", "深入研究", "多方案比较",
+		"travel", "trip", "itinerary", "vacation", "road trip", "flight", "hotel", "accommodation", "research", "deep research", "compare options",
 	}
 	webExternalKnowledgeKeywords = []string{
 		"公司", "产品", "模型", "软件", "框架", "库", "api", "国家", "城市", "政府", "学校", "医院", "比赛", "电影", "餐厅", "酒店", "景点",
@@ -98,7 +102,7 @@ func selectBuiltinTools(text string, hasFiles bool) []string {
 	if needsWebAccess(text) {
 		add("WebSearch", "WebFetch")
 	}
-	if matchesAny(text, planKeywords) {
+	if matchesAny(text, planKeywords) || matchesAny(text, researchPlanningKeywords) {
 		add("TodoWrite", "EnterPlanMode", "ExitPlanMode")
 	}
 	if matchesAny(text, taskKeywords) {
@@ -111,7 +115,7 @@ func selectBuiltinTools(text string, hasFiles bool) []string {
 }
 
 func needsWebAccess(text string) bool {
-	if matchesAny(text, webKeywords) || matchesAny(text, webTemporalKeywords) || matchesAny(text, webMutableFactKeywords) || matchesAny(text, webRecommendationKeywords) {
+	if matchesAny(text, webKeywords) || matchesAny(text, webTemporalKeywords) || matchesAny(text, webMutableFactKeywords) || matchesAny(text, webRecommendationKeywords) || matchesAny(text, researchPlanningKeywords) {
 		return true
 	}
 	return matchesAny(text, webQuestionKeywords) && matchesAny(text, webExternalKnowledgeKeywords)

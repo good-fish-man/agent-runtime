@@ -30,6 +30,15 @@ func TestIsUserVisibleMessage(t *testing.T) {
 			message: schema.ToolMessage(`{"private":"result"}`, "call-other", schema.WithToolName("OtherTool")),
 			want:    false,
 		},
+		{
+			name: "clarification question",
+			message: schema.ToolMessage(
+				`{"questions":[{"question":"Drive?","options":[{"label":"Yes"},{"label":"No"}]}]}`,
+				"call-question",
+				schema.WithToolName(tools.AskUserQuestionToolName),
+			),
+			want: true,
+		},
 		{name: "user", message: schema.UserMessage("hello"), want: false},
 	}
 

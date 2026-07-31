@@ -68,6 +68,15 @@ func TestLocalProjectRequestDoesNotEnableWebTools(t *testing.T) {
 	}
 }
 
+func TestTravelPlanningEnablesResearchLoopTools(t *testing.T) {
+	tools := selectBuiltinTools("下个月去北海道旅行五天", false)
+	for _, want := range []string{"WebSearch", "WebFetch", "TodoWrite", "AskUserQuestion"} {
+		if !contains(tools, want) {
+			t.Fatalf("travel planning tools %v missing %s", tools, want)
+		}
+	}
+}
+
 func TestShippedSkillRouting(t *testing.T) {
 	skills := plugins.DiscoverSkillsFromDir("../../skills")
 	if len(skills) < 6 {

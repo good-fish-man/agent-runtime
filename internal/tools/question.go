@@ -9,6 +9,8 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
+const AskUserQuestionToolName = "AskUserQuestion"
+
 // ========== AskUserQuestionTool ==========
 
 // QuestionOption represents a single choice option
@@ -18,11 +20,39 @@ type QuestionOption struct {
 }
 
 // QuestionInput for ask user question tool
-type QuestionInput struct {
+type ClarificationQuestion struct {
 	Question    string           `json:"question"`         // The question to ask
 	Options     []QuestionOption `json:"options"`          // Answer options
 	Header      string           `json:"header,omitempty"` // Short header for the question
 	MultiSelect bool             `json:"multi_select"`     // Allow multiple selections
+}
+
+// QuestionInput groups related blocking questions into one user interaction.
+type QuestionInput struct {
+	Intro     string                  `json:"intro,omitempty"`
+	Questions []ClarificationQuestion `json:"questions,omitempty"`
+
+	// Legacy single-question fields are accepted for existing agents and old
+	// conversation context. Tool metadata only advertises the batch format.
+	Question    string           `json:"question,omitempty"`
+	Options     []QuestionOption `json:"options,omitempty"`
+	Header      string           `json:"header,omitempty"`
+	MultiSelect bool             `json:"multi_select,omitempty"`
+}
+
+func (q *QuestionInput) normalize() {
+	if len(q.Questions) == 0 && q.Question != "" {
+		q.Questions = []ClarificationQuestion{{
+			Question:    q.Question,
+			Options:     q.Options,
+			Header:      q.Header,
+			MultiSelect: q.MultiSelect,
+		}}
+	}
+	q.Question = ""
+	q.Options = nil
+	q.Header = ""
+	q.MultiSelect = false
 }
 
 // QuestionOutput for ask user question result
@@ -41,8 +71,8 @@ func NewAskUserQuestionTool() *AskUserQuestionTool {
 
 func init() {
 	GlobalRegistry.Register(ToolMeta{
-		Name:           "AskUserQuestion",
-		Desc:           "Ask the user multiple choice questions to gather information, clarify ambiguity, or understand preferences.",
+		Name:           AskUserQuestionToolName,
+		Desc:           "Pause the current run and ask the user 1-3 related preference or clarification questions in one interactive card. Use only for information the user must decide, not facts that can be researched.",
 		IsReadOnly:     false,
 		MaxResultChars: 1000,
 		DefaultRisk:    "low",
@@ -54,28 +84,29 @@ func init() {
 
 func (t *AskUserQuestionTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
-		Name: "AskUserQuestion",
-		Desc: "Ask the user multiple choice questions to gather information, clarify ambiguity, or understand preferences.",
+		Name: AskUserQuestionToolName,
+		Desc: "Pause the current run and ask the user 1-3 related preference or clarification questions in one interactive card. The tool returns directly to the user, so call it only after completing any research needed for this turn.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"question": {
+			"intro": {
 				Type:     schema.String,
-				Desc:     "The question to ask the user",
-				Required: true,
+				Desc:     "Optional concise summary of relevant findings and why these choices are needed; it remains in conversation history",
+				Required: false,
 			},
-			"options": {
+			"questions": {
 				Type:     schema.Array,
-				Desc:     "Answer options (each with label and optional description)",
+				Desc:     "One to three independent questions",
 				Required: true,
-			},
-			"header": {
-				Type:     schema.String,
-				Desc:     "Short header/chip for the question (max 12 chars)",
-				Required: false,
-			},
-			"multi_select": {
-				Type:     schema.Boolean,
-				Desc:     "Allow multiple selections (default false)",
-				Required: false,
+				ElemInfo: &schema.ParameterInfo{Type: schema.Object, SubParams: map[string]*schema.ParameterInfo{
+					"question":     {Type: schema.String, Desc: "Question shown to the user", Required: true},
+					"header":       {Type: schema.String, Desc: "Short category label, at most 12 characters", Required: false},
+					"multi_select": {Type: schema.Boolean, Desc: "Whether multiple options may be selected", Required: false},
+					"options": {Type: schema.Array, Desc: "Two to four answer options", Required: true, ElemInfo: &schema.ParameterInfo{
+						Type: schema.Object, SubParams: map[string]*schema.ParameterInfo{
+							"label":       {Type: schema.String, Desc: "Short answer label", Required: true},
+							"description": {Type: schema.String, Desc: "Impact or tradeoff", Required: false},
+						},
+					}},
+				}},
 			},
 		}),
 	}, nil
@@ -86,14 +117,17 @@ func (t *AskUserQuestionTool) ValidateInput(ctx context.Context, input string) *
 	if err := json.Unmarshal([]byte(input), &questionInput); err != nil {
 		return &ValidationResult{Valid: false, Message: fmt.Sprintf("invalid JSON: %v", err), ErrorCode: 1}
 	}
-	if questionInput.Question == "" {
-		return &ValidationResult{Valid: false, Message: "question is required", ErrorCode: 2}
+	questionInput.normalize()
+	if len(questionInput.Questions) < 1 || len(questionInput.Questions) > 3 {
+		return &ValidationResult{Valid: false, Message: "questions must contain 1 to 3 items", ErrorCode: 2}
 	}
-	if len(questionInput.Options) < 2 {
-		return &ValidationResult{Valid: false, Message: "at least 2 options are required", ErrorCode: 3}
-	}
-	if len(questionInput.Options) > 4 {
-		return &ValidationResult{Valid: false, Message: "maximum 4 options allowed", ErrorCode: 4}
+	for index, question := range questionInput.Questions {
+		if question.Question == "" {
+			return &ValidationResult{Valid: false, Message: fmt.Sprintf("question %d text is required", index+1), ErrorCode: 3}
+		}
+		if len(question.Options) < 2 || len(question.Options) > 4 {
+			return &ValidationResult{Valid: false, Message: fmt.Sprintf("question %d must have 2 to 4 options", index+1), ErrorCode: 4}
+		}
 	}
 	return &ValidationResult{Valid: true}
 }
@@ -103,38 +137,8 @@ func (t *AskUserQuestionTool) InvokableRun(ctx context.Context, input string, op
 	if err := json.Unmarshal([]byte(input), &questionInput); err != nil {
 		return "", fmt.Errorf("invalid input: %w", err)
 	}
+	questionInput.normalize()
 
-	// In a CLI context, this would present the question to the user
-	// and wait for their response. For now, we return a structure
-	// that indicates the question was asked.
-
-	// Build options description
-	optionsDesc := make([]string, 0)
-	for i, opt := range questionInput.Options {
-		desc := fmt.Sprintf("%d. %s", i+1, opt.Label)
-		if opt.Description != "" {
-			desc += fmt.Sprintf(" - %s", opt.Description)
-		}
-		optionsDesc = append(optionsDesc, desc)
-	}
-
-	// Return the question details for the system to handle
-	// For now, return the formatted question
-	// In a real implementation, this would block until user responds
-	type QuestionForUI struct {
-		Question    string           `json:"question"`
-		Options     []QuestionOption `json:"options"`
-		Header      string           `json:"header,omitempty"`
-		MultiSelect bool             `json:"multi_select"`
-	}
-
-	q := QuestionForUI{
-		Question:    questionInput.Question,
-		Options:     questionInput.Options,
-		Header:      questionInput.Header,
-		MultiSelect: questionInput.MultiSelect,
-	}
-
-	result, _ := json.Marshal(q)
+	result, _ := json.Marshal(questionInput)
 	return string(result), nil
 }

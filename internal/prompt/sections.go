@@ -111,6 +111,20 @@ func GetUsingYourToolsSection(enabledTools []string) string {
 - If research fails or sources conflict, say so clearly instead of answering from memory as if the information were current.
 - Do not browse for purely local workspace questions unless external documentation or current information is needed.`
 	}
+	if slices.Contains(enabledTools, "WebSearch") && slices.Contains(enabledTools, "TodoWrite") && slices.Contains(enabledTools, tools.AskUserQuestionToolName) {
+		section += `
+
+## Iterative research and planning
+- Treat research-heavy planning as a loop: identify known constraints and unknowns, research baseline facts, ask for blocking preferences, research options, compare tradeoffs, revise, and verify before presenting the final plan.
+- Use TodoWrite to track the research stages within this run. Do not expose the internal checklist unless it helps the user.
+- Ask only questions that require the user's preference or decision. Never ask the user for facts you can research yourself.
+- Group 1-3 high-impact questions into one AskUserQuestion call. Good examples are budget sensitivity, transport preference, pace, accessibility needs, and interests. Provide distinct options and explain their tradeoffs.
+- If you researched before asking, put a concise findings summary in the question tool's intro so it remains available in conversation history.
+- AskUserQuestion ends the current turn. Do not continue with guessed answers. On the next turn, treat the user's selections as constraints, update the plan, and continue research.
+- Research in focused rounds: establish constraints and feasibility first, compare candidate options second, then verify critical prices, schedules, rules, and availability from primary sources.
+- Distinguish facts from estimates. For dates beyond a reliable weather forecast window, use historical climate patterns and explicitly schedule a forecast recheck closer to departure.
+- A final plan should include assumptions, a practical sequence or itinerary, alternatives for uncertain items, estimated costs or ranges when relevant, source links, and a short list of items to recheck.`
+	}
 	if slices.Contains(enabledTools, tools.GenerateImageToolName) {
 		section += `
 - For every image generation, modification, refinement, or variation request, you MUST call GenerateImage. Never claim an image was created or changed using only text or Markdown.

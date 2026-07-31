@@ -63,3 +63,18 @@ func TestGetRuntimeContextSection(t *testing.T) {
 		t.Fatalf("unexpected runtime context section: %s", section)
 	}
 }
+
+func TestGetUsingYourToolsSectionAddsIterativePlanningRules(t *testing.T) {
+	section := GetUsingYourToolsSection([]string{"WebSearch", "WebFetch", "TodoWrite", tools.AskUserQuestionToolName})
+	for _, required := range []string{
+		"Iterative research and planning",
+		"Group 1-3 high-impact questions",
+		"ends the current turn",
+		"historical climate patterns",
+		"continue research",
+	} {
+		if !strings.Contains(section, required) {
+			t.Fatalf("planning section does not contain %q:\n%s", required, section)
+		}
+	}
+}
