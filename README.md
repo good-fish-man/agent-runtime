@@ -117,13 +117,15 @@ server:
     api_base: "https://api.openai.com/v1"
 
 memory:
-  enabled: false
+  enabled: true
   auto_migrate: true
 
 skills:
   dir: "skills"
   config_path: "config/skills-config.yaml"
 ```
+
+Memory is enabled by default when the database is enabled. Athena Launcher installs and configures PostgreSQL automatically; standalone deployments must also set `db.enabled: true` and provide a reachable database. If the database is unavailable, the runtime continues without persistent memory and logs the connection error.
 
 Environment overrides:
 

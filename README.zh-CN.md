@@ -117,13 +117,15 @@ server:
     api_base: "https://api.openai.com/v1"
 
 memory:
-  enabled: false
+  enabled: true
   auto_migrate: true
 
 skills:
   dir: "skills"
   config_path: "config/skills-config.yaml"
 ```
+
+数据库启用时，长期记忆默认开启。Athena Launcher 会自动安装并配置 PostgreSQL；独立部署时还需要设置 `db.enabled: true` 并提供可连接的数据库。数据库不可用时，runtime 会记录连接错误并降级为无持久记忆模式，不会阻止基础对话服务启动。
 
 环境变量覆盖：
 
