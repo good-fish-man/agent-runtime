@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/good-fish-man/agent-runtime/internal/tools"
 	"github.com/good-fish-man/agent-runtime/internal/types"
@@ -98,6 +99,18 @@ func GetUsingYourToolsSection(enabledTools []string) string {
 - You can call multiple tools in a single response when they are independent.
 - If tool calls depend on previous results, call them sequentially.
 - When using tools, prefer the most specific tool for the task.`, toolsList)
+	if slices.Contains(enabledTools, "WebSearch") || slices.Contains(enabledTools, "WebFetch") {
+		section += `
+
+## Web research rules
+- You have working web tools. Never say you cannot access the internet when WebSearch or WebFetch is available.
+- You MUST research before answering requests involving current or potentially changed facts, recent events, prices, laws, policies, schedules, public office holders, product or software versions, recommendations, explicit verification, citations, or referenced web pages.
+- Use WebSearch to discover sources, then WebFetch the most relevant authoritative or primary pages when details matter. Do not rely only on search snippets for important claims.
+- Prefer official documentation, government sources, original announcements, and primary sources. Compare multiple sources when accuracy or recency matters.
+- Include clickable source URLs near the claims they support. Never invent a citation or URL.
+- If research fails or sources conflict, say so clearly instead of answering from memory as if the information were current.
+- Do not browse for purely local workspace questions unless external documentation or current information is needed.`
+	}
 	if slices.Contains(enabledTools, tools.GenerateImageToolName) {
 		section += `
 - For every image generation, modification, refinement, or variation request, you MUST call GenerateImage. Never claim an image was created or changed using only text or Markdown.
@@ -114,6 +127,12 @@ func GetUsingYourToolsSection(enabledTools []string) string {
 - Never output pseudo-tool markup instead of making the real GenerateVideo call.`
 	}
 	return section
+}
+
+// GetRuntimeContextSection returns per-request temporal context that must not be cached.
+func GetRuntimeContextSection(now time.Time) string {
+	zone, _ := now.Zone()
+	return fmt.Sprintf("# Runtime context\n- Current date: %s\n- Time zone: %s", now.Format("2006-01-02"), zone)
 }
 
 // GetOutputEfficiencySection returns the output efficiency section

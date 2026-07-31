@@ -13,6 +13,7 @@ package dispatcher
 
 import (
 	"context"
+	"time"
 
 	"github.com/good-fish-man/agent-runtime/internal/contextcompressor"
 	"github.com/good-fish-man/agent-runtime/internal/eino"
@@ -126,13 +127,14 @@ func (d *Dispatcher) maxIterations() int {
 // buildInstruction assembles the system prompt: static sections (keyed by the
 // enabled tool set) + per-request dynamic sections + optional memory block.
 func (d *Dispatcher) buildInstruction() string {
-	parts := make([]string, 0, 4)
+	parts := make([]string, 0, 5)
 	if s := prompt.BuildStaticPrompt(d.toolNames); s != "" {
 		parts = append(parts, s)
 	}
 	if s := prompt.BuildDynamicPrompt(d.req); s != "" {
 		parts = append(parts, s)
 	}
+	parts = append(parts, prompt.GetRuntimeContextSection(time.Now()))
 	if d.memInstr != "" {
 		parts = append(parts, d.memInstr)
 	}

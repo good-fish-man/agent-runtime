@@ -3,6 +3,7 @@ package prompt
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/good-fish-man/agent-runtime/internal/tools"
 )
@@ -38,5 +39,27 @@ func TestGetUsingYourToolsSectionOmitsImageRulesWithoutImageTool(t *testing.T) {
 	section := GetUsingYourToolsSection([]string{"Bash"})
 	if strings.Contains(section, "MUST call GenerateImage") {
 		t.Fatalf("non-image tool section contains image generation rules:\n%s", section)
+	}
+}
+
+func TestGetUsingYourToolsSectionAddsWebResearchRules(t *testing.T) {
+	section := GetUsingYourToolsSection([]string{"WebSearch", "WebFetch"})
+	for _, required := range []string{
+		"MUST research before answering",
+		"authoritative or primary pages",
+		"Include clickable source URLs",
+		"instead of answering from memory",
+	} {
+		if !strings.Contains(section, required) {
+			t.Fatalf("web tool section does not contain %q:\n%s", required, section)
+		}
+	}
+}
+
+func TestGetRuntimeContextSection(t *testing.T) {
+	now := time.Date(2026, time.July, 31, 12, 0, 0, 0, time.FixedZone("GST", 4*60*60))
+	section := GetRuntimeContextSection(now)
+	if !strings.Contains(section, "2026-07-31") || !strings.Contains(section, "GST") {
+		t.Fatalf("unexpected runtime context section: %s", section)
 	}
 }

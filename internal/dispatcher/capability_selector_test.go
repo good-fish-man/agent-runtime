@@ -45,6 +45,29 @@ func TestEnglishKeywordsUseWholeTokens(t *testing.T) {
 	}
 }
 
+func TestSelectBuiltinToolsForImplicitWebResearch(t *testing.T) {
+	tests := []string{
+		"OpenAI 现任 CEO 是谁？",
+		"Go 当前稳定版本是多少？",
+		"推荐一款今年适合本地运行大模型的笔记本",
+		"请核实这个说法并给出官方来源",
+		"What is the current exchange rate between USD and AED?",
+	}
+	for _, prompt := range tests {
+		tools := selectBuiltinTools(prompt, false)
+		if !contains(tools, "WebSearch") || !contains(tools, "WebFetch") {
+			t.Errorf("prompt %q did not enable web tools: %v", prompt, tools)
+		}
+	}
+}
+
+func TestLocalProjectRequestDoesNotEnableWebTools(t *testing.T) {
+	tools := selectBuiltinTools("帮我优化当前项目的错误处理", false)
+	if contains(tools, "WebSearch") || contains(tools, "WebFetch") {
+		t.Fatalf("local project request enabled web tools: %v", tools)
+	}
+}
+
 func TestShippedSkillRouting(t *testing.T) {
 	skills := plugins.DiscoverSkillsFromDir("../../skills")
 	if len(skills) < 6 {

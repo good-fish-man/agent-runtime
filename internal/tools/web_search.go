@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
@@ -52,7 +53,7 @@ func NewWebSearchTool() *WebSearchTool {
 func init() {
 	GlobalRegistry.Register(ToolMeta{
 		Name:           "WebSearch",
-		Desc:           "Search the web for current events and recent information. Use this for queries that require up-to-date information not in the model's training data.",
+		Desc:           "Search the public web. Use before answering current, unstable, recent, recommended, explicitly verified, or source-dependent questions. Returns titles, direct URLs, and snippets; fetch important sources with WebFetch.",
 		IsReadOnly:     true,
 		MaxResultChars: 50000,
 		DefaultRisk:    "low",
@@ -65,7 +66,7 @@ func init() {
 func (t *WebSearchTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: "WebSearch",
-		Desc: "Search the web for current events and recent information. Use this for queries that require up-to-date information not in the model's training data.",
+		Desc: "Search the public web. Use before answering current, unstable, recent, recommended, explicitly verified, or source-dependent questions. Returns titles, direct URLs, and snippets; fetch important sources with WebFetch.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"query": {
 				Type:     schema.String,
@@ -119,6 +120,9 @@ func (t *WebSearchTool) InvokableRun(ctx context.Context, input string, opts ...
 		return "", fmt.Errorf("search failed: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return "", fmt.Errorf("search returned HTTP %d", resp.StatusCode)
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -126,6 +130,9 @@ func (t *WebSearchTool) InvokableRun(ctx context.Context, input string, opts ...
 	}
 
 	results := parseDuckDuckGoResults(string(body), count)
+	if len(results) == 0 {
+		return "", fmt.Errorf("search returned no results; retry with a shorter or more specific query")
+	}
 
 	output := WebSearchOutput{
 		Results: results,
@@ -153,7 +160,7 @@ func parseDuckDuckGoResults(html string, count int) []SearchResult {
 			hrefStart := strings.Index(line, "href=\"") + 6
 			hrefEnd := strings.Index(line[hrefStart:], "\"")
 			if hrefEnd > 0 {
-				resultURL := line[hrefStart : hrefStart+hrefEnd]
+				resultURL := normalizeSearchResultURL(line[hrefStart : hrefStart+hrefEnd])
 				currentResult = &SearchResult{URL: resultURL}
 			}
 
@@ -184,4 +191,23 @@ func parseDuckDuckGoResults(html string, count int) []SearchResult {
 	}
 
 	return results
+}
+
+func normalizeSearchResultURL(value string) string {
+	value = html.UnescapeString(strings.TrimSpace(value))
+	if strings.HasPrefix(value, "//") {
+		value = "https:" + value
+	} else if strings.HasPrefix(value, "/") {
+		value = "https://duckduckgo.com" + value
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return value
+	}
+	if strings.HasSuffix(strings.ToLower(parsed.Hostname()), "duckduckgo.com") {
+		if target := parsed.Query().Get("uddg"); target != "" {
+			return target
+		}
+	}
+	return value
 }

@@ -50,7 +50,10 @@ func NewWebFetchTool() *WebFetchTool {
 		client: &http.Client{
 			Timeout: constant.DefaultWebRequestTimeoutSec * time.Second,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				return http.ErrUseLastResponse // Don't follow redirects automatically
+				if len(via) >= 10 {
+					return fmt.Errorf("stopped after 10 redirects")
+				}
+				return nil
 			},
 		},
 		cache:    make(map[string]*cachedFetch),
@@ -61,7 +64,7 @@ func NewWebFetchTool() *WebFetchTool {
 func init() {
 	GlobalRegistry.Register(ToolMeta{
 		Name:           "WebFetch",
-		Desc:           "Fetch and analyze web content from a URL. Use this to retrieve information from web pages.",
+		Desc:           "Fetch a web page and return its final URL, title, status, and readable content. Use after WebSearch to verify important claims against authoritative sources.",
 		IsReadOnly:     true,
 		MaxResultChars: 500000,
 		DefaultRisk:    "low",
@@ -74,7 +77,7 @@ func init() {
 func (t *WebFetchTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: "WebFetch",
-		Desc: "Fetch and analyze web content from a URL. Use this to retrieve information from web pages.",
+		Desc: "Fetch a web page and return its final URL, title, status, and readable content. Use after WebSearch to verify important claims against authoritative sources.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"url": {
 				Type:     schema.String,
@@ -148,19 +151,7 @@ func (t *WebFetchTool) InvokableRun(ctx context.Context, input string, opts ...t
 	}
 	defer resp.Body.Close()
 
-	// Handle redirects
-	finalURL := fetchInput.URL
-	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-		// Get redirect URL from Location header
-		if loc := resp.Header.Get("Location"); loc != "" {
-			if strings.HasPrefix(loc, "/") {
-				u, _ := url.Parse(fetchInput.URL)
-				finalURL = u.Scheme + "://" + u.Host + loc
-			} else {
-				finalURL = loc
-			}
-		}
-	}
+	finalURL := resp.Request.URL.String()
 
 	// Read body with size limit (1MB)
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))

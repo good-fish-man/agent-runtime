@@ -22,7 +22,30 @@ var (
 		"运行", "执行", "测试", "构建", "编译", "安装", "启动", "命令", "终端", "run", "test", "build", "compile", "install", "start", "command", "terminal", "shell", "npm", "pnpm", "yarn", "go test", "docker",
 	}
 	webKeywords = []string{
-		"联网", "搜索网页", "网上", "最新", "天气", "新闻", "网站", "网址", "url", "http://", "https://", "web", "search", "search online", "browse", "website", "news", "weather",
+		"联网", "上网", "搜索网页", "网上查", "查询一下", "查一下", "查证", "核实", "验证信息", "官网", "官方文档", "来源", "出处", "引用", "链接",
+		"网站", "网址", "url", "http://", "https://", "web", "search", "search online", "look up", "browse", "website", "source", "citation", "official docs", "verify",
+	}
+	webTemporalKeywords = []string{
+		"最新", "现任", "目前", "近期", "最近", "今天", "昨日", "昨天", "本周", "本月", "今年", "截至", "实时", "刚刚", "现在还有", "是否仍然",
+		"latest", "current", "currently", "recent", "recently", "today", "yesterday", "this week", "this month", "this year", "as of", "real-time", "still available",
+	}
+	webMutableFactKeywords = []string{
+		"天气", "新闻", "价格", "报价", "汇率", "股价", "市值", "利率", "政策", "法规", "法律", "规定", "标准", "版本", "发布日期", "发布时间", "更新日志",
+		"总统", "主席", "首相", "部长", "市长", "ceo", "cto", "负责人", "创始人", "赛程", "比分", "排名", "票房", "航班", "时刻表", "库存", "营业时间",
+		"weather", "news", "price", "exchange rate", "stock", "market cap", "interest rate", "policy", "regulation", "law", "standard", "version", "release date", "changelog",
+		"president", "prime minister", "minister", "mayor", "founder", "schedule", "score", "ranking", "flight", "opening hours", "availability",
+	}
+	webRecommendationKeywords = []string{
+		"推荐", "值得买吗", "哪个好", "哪家", "哪里吃", "哪里住", "旅游攻略", "购买建议", "选型", "对比一下",
+		"recommend", "recommendation", "best", "worth buying", "where to eat", "where to stay", "travel plan", "buying guide", "compare products",
+	}
+	webExternalKnowledgeKeywords = []string{
+		"公司", "产品", "模型", "软件", "框架", "库", "api", "国家", "城市", "政府", "学校", "医院", "比赛", "电影", "餐厅", "酒店", "景点",
+		"company", "product", "model", "software", "framework", "library", "country", "city", "government", "school", "hospital", "game", "movie", "restaurant", "hotel",
+	}
+	webQuestionKeywords = []string{
+		"是谁", "是什么", "多少", "怎么样", "如何", "为什么", "有没有", "是否", "哪一个", "哪个", "哪里", "什么时候",
+		"who", "what", "how much", "how many", "how", "why", "whether", "which", "where", "when",
 	}
 	planKeywords = []string{
 		"计划", "步骤", "待办", "复杂任务", "整体重构", "plan", "todo", "steps", "multi-step",
@@ -72,7 +95,7 @@ func selectBuiltinTools(text string, hasFiles bool) []string {
 	if matchesAny(text, commandKeywords) {
 		add("Bash")
 	}
-	if matchesAny(text, webKeywords) {
+	if needsWebAccess(text) {
 		add("WebSearch", "WebFetch")
 	}
 	if matchesAny(text, planKeywords) {
@@ -85,6 +108,13 @@ func selectBuiltinTools(text string, hasFiles bool) []string {
 		add("Sleep")
 	}
 	return selected
+}
+
+func needsWebAccess(text string) bool {
+	if matchesAny(text, webKeywords) || matchesAny(text, webTemporalKeywords) || matchesAny(text, webMutableFactKeywords) || matchesAny(text, webRecommendationKeywords) {
+		return true
+	}
+	return matchesAny(text, webQuestionKeywords) && matchesAny(text, webExternalKnowledgeKeywords)
 }
 
 type scoredSkill struct {
