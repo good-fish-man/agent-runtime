@@ -7,7 +7,7 @@ import (
 	"runtime/debug"
 	"time"
 
-	"github.com/good-fish-man/agent-runtime/log"
+	log "github.com/good-fish-man/logx"
 )
 
 const errorResponseLogLimit = 4 * 1024

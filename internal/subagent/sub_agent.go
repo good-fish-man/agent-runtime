@@ -63,8 +63,8 @@ type SubAgentConfig struct {
 	Name          string          `json:"name"`
 	Description   string          `json:"description"`
 	Prompt        string          `json:"prompt"`
-	Model         *ModelConfig    `json:"model,omitempty"`  // 可选，默认使用主模型
-	Tools         []string        `json:"tools,omitempty"`  // 工具名称列表
+	Model         *ModelConfig    `json:"model,omitempty"` // 可选，默认使用主模型
+	Capabilities  []string        `json:"capabilities,omitempty"`
 	Skills        []string        `json:"skills,omitempty"` // 技能列表
 	MCPs          []string        `json:"mcps,omitempty"`   // MCP 配置
 	RuntimeTools  []tool.BaseTool `json:"-"`

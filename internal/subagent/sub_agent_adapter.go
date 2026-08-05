@@ -7,7 +7,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
-	"github.com/good-fish-man/agent-runtime/log"
+	log "github.com/good-fish-man/logx"
 )
 
 // SubAgentAdapter wraps a SubAgent's inner adk.Agent to implement the adk.Agent interface

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/components/model"
-	"github.com/good-fish-man/agent-runtime/log"
+	log "github.com/good-fish-man/logx"
 )
 
 type TaskStatus string

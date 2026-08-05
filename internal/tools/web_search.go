@@ -14,6 +14,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"github.com/good-fish-man/agent-runtime/internal/constant"
+	xhtml "golang.org/x/net/html"
 )
 
 // ========== WebSearchTool ==========
@@ -28,6 +29,8 @@ type WebSearchInput struct {
 type WebSearchOutput struct {
 	Results []SearchResult `json:"results"`
 	Query   string         `json:"query"`
+	Status  string         `json:"status"`
+	Message string         `json:"message,omitempty"`
 }
 
 // SearchResult represents a single search result
@@ -87,7 +90,7 @@ func (t *WebSearchTool) ValidateInput(ctx context.Context, input string) *Valida
 	if err := json.Unmarshal([]byte(input), &searchInput); err != nil {
 		return &ValidationResult{Valid: false, Message: fmt.Sprintf("invalid JSON: %v", err), ErrorCode: 1}
 	}
-	if searchInput.Query == "" {
+	if strings.TrimSpace(searchInput.Query) == "" {
 		return &ValidationResult{Valid: false, Message: "query is required", ErrorCode: 2}
 	}
 	return &ValidationResult{Valid: true}
@@ -98,52 +101,100 @@ func (t *WebSearchTool) InvokableRun(ctx context.Context, input string, opts ...
 	if err := json.Unmarshal([]byte(input), &searchInput); err != nil {
 		return "", fmt.Errorf("invalid input: %w", err)
 	}
+	searchInput.Query = strings.TrimSpace(searchInput.Query)
+	if searchInput.Query == "" {
+		return "", fmt.Errorf("query is required")
+	}
 
 	count := searchInput.Count
 	if count <= 0 || count > 20 {
 		count = 10
 	}
 
-	// Use DuckDuckGo HTML search (no API key required)
+	// Try both public DuckDuckGo frontends. Either endpoint may independently
+	// reject automated traffic, so provider failures are recoverable results.
 	query := url.QueryEscape(searchInput.Query)
-	searchURL := fmt.Sprintf(constant.DuckDuckGoHTMLSearchURL, query)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
-	if err != nil {
-		return "", fmt.Errorf("invalid URL: %w", err)
+	searchURLs := []string{
+		fmt.Sprintf(constant.DuckDuckGoHTMLSearchURL, query),
+		fmt.Sprintf("https://lite.duckduckgo.com/lite/?q=%s", query),
 	}
-
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; RunnerBot/1.0)")
-
-	resp, err := t.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("search failed: %w", err)
+	var results []SearchResult
+	failures := make([]string, 0, len(searchURLs))
+	for _, searchURL := range searchURLs {
+		body, status, err := t.fetchSearchPage(ctx, searchURL)
+		if err != nil {
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			failures = append(failures, err.Error())
+			continue
+		}
+		if status < http.StatusOK || status >= http.StatusMultipleChoices {
+			failures = append(failures, fmt.Sprintf("HTTP %d", status))
+			continue
+		}
+		results = parseDuckDuckGoResults(string(body), count)
+		if len(results) > 0 {
+			break
+		}
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return "", fmt.Errorf("search returned HTTP %d", resp.StatusCode)
+	if len(results) == 0 && len(failures) == len(searchURLs) {
+		return marshalWebSearchOutput(WebSearchOutput{
+			Results: []SearchResult{}, Query: searchInput.Query, Status: "search_unavailable",
+			Message: "The public search provider is temporarily unavailable or rejected the request (" + strings.Join(failures, "; ") + "). Do not repeat the same query immediately. Continue with other available browsing tools or explain the temporary search limitation.",
+		})
 	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("read body failed: %w", err)
-	}
-
-	results := parseDuckDuckGoResults(string(body), count)
 	if len(results) == 0 {
-		return "", fmt.Errorf("search returned no results; retry with a shorter or more specific query")
+		return marshalWebSearchOutput(WebSearchOutput{
+			Results: []SearchResult{},
+			Query:   searchInput.Query,
+			Status:  "no_results",
+			Message: "No results were found. Do not repeat the same query. Retry once with a shorter or more specific query; if a required detail such as location is missing, ask the user for it.",
+		})
 	}
 
 	output := WebSearchOutput{
 		Results: results,
 		Query:   searchInput.Query,
+		Status:  "ok",
 	}
+	return marshalWebSearchOutput(output)
+}
 
-	result, _ := json.Marshal(output)
+func (t *WebSearchTool) fetchSearchPage(ctx context.Context, searchURL string) ([]byte, int, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, searchURL, nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("invalid search URL: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.8")
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read response: %w", err)
+	}
+	return body, resp.StatusCode, nil
+}
+
+func marshalWebSearchOutput(output WebSearchOutput) (string, error) {
+	result, err := json.Marshal(output)
+	if err != nil {
+		return "", fmt.Errorf("encode search results: %w", err)
+	}
 	return string(result), nil
 }
 
 func parseDuckDuckGoResults(html string, count int) []SearchResult {
+	if results := parseDuckDuckGoDocument(html, count); len(results) > 0 {
+		return results
+	}
 	var results []SearchResult
 
 	// Simple HTML parsing for DuckDuckGo results
@@ -191,6 +242,71 @@ func parseDuckDuckGoResults(html string, count int) []SearchResult {
 	}
 
 	return results
+}
+
+func parseDuckDuckGoDocument(document string, count int) []SearchResult {
+	root, err := xhtml.Parse(strings.NewReader(document))
+	if err != nil {
+		return nil
+	}
+	results := make([]SearchResult, 0, count)
+	var current *SearchResult
+	var walk func(*xhtml.Node)
+	walk = func(node *xhtml.Node) {
+		if len(results) >= count {
+			return
+		}
+		if node.Type == xhtml.ElementNode {
+			className := htmlAttribute(node, "class")
+			if node.Data == "a" && (hasHTMLClass(className, "result__a") || hasHTMLClass(className, "result-link")) {
+				if current != nil && current.URL != "" {
+					results = append(results, *current)
+				}
+				current = &SearchResult{Title: strings.TrimSpace(htmlNodeText(node)), URL: normalizeSearchResultURL(htmlAttribute(node, "href"))}
+			} else if current != nil && (hasHTMLClass(className, "result__snippet") || hasHTMLClass(className, "result-snippet")) {
+				current.Snippet = strings.TrimSpace(htmlNodeText(node))
+				results = append(results, *current)
+				current = nil
+			}
+		}
+		for child := node.FirstChild; child != nil && len(results) < count; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(root)
+	if current != nil && current.URL != "" && len(results) < count {
+		results = append(results, *current)
+	}
+	return results
+}
+
+func htmlAttribute(node *xhtml.Node, name string) string {
+	for _, attribute := range node.Attr {
+		if attribute.Key == name {
+			return attribute.Val
+		}
+	}
+	return ""
+}
+
+func hasHTMLClass(value, wanted string) bool {
+	for _, className := range strings.Fields(value) {
+		if className == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func htmlNodeText(node *xhtml.Node) string {
+	if node.Type == xhtml.TextNode {
+		return node.Data
+	}
+	var builder strings.Builder
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		builder.WriteString(htmlNodeText(child))
+	}
+	return builder.String()
 }
 
 func normalizeSearchResultURL(value string) string {

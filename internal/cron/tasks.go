@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/good-fish-man/agent-runtime/log"
+	log "github.com/good-fish-man/logx"
 )
 
 // ========== Constants ==========

@@ -18,7 +18,7 @@ import (
 
 	"github.com/good-fish-man/agent-runtime/internal/constant"
 	"github.com/good-fish-man/agent-runtime/internal/types"
-	"github.com/good-fish-man/agent-runtime/log"
+	log "github.com/good-fish-man/logx"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
@@ -189,8 +189,8 @@ func generateDiffusersVideo(ctx context.Context, model types.ModelConfig, input 
 	if input.SourceURL != "" {
 		return nil, fmt.Errorf("local video model %s does not support image-to-video", model.Name)
 	}
-	modelDir := filepath.Join(athenaDir(), "models", "diffusers", strings.ReplaceAll(model.Name, "/", "--"))
-	if _, err := os.Stat(filepath.Join(modelDir, ".athena_complete")); err != nil {
+	modelDir := diffusersModelDir(model.Name)
+	if _, err := os.Stat(filepath.Join(modelDir, constant.DiffusersCompleteFileName)); err != nil {
 		return nil, fmt.Errorf("local video model is not downloaded: %s", model.Name)
 	}
 	if err := os.MkdirAll(GeneratedImagesDir(), 0o755); err != nil {

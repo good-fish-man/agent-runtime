@@ -8,8 +8,9 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/good-fish-man/agent-runtime/internal/capability"
 	"github.com/good-fish-man/agent-runtime/internal/tools"
-	"github.com/good-fish-man/agent-runtime/log"
+	log "github.com/good-fish-man/logx"
 
 	"github.com/cloudwego/eino/components/tool"
 )
@@ -25,7 +26,7 @@ type textToolCall struct {
 }
 
 // executeTextToolMarkup is a narrow compatibility path for small local models
-// that print a media tool call instead of returning native tool_calls.
+// that print a supported direct-return tool call instead of returning native tool_calls.
 func executeTextToolMarkup(ctx context.Context, content string, available []tool.BaseTool) (string, bool, error) {
 	call, matched, err := parseTextToolCall(content)
 	if !matched {
@@ -35,7 +36,7 @@ func executeTextToolMarkup(ctx context.Context, content string, available []tool
 		log.WarnfCtx(ctx, "[ToolMarkup] ignored malformed text tool call: %v", err)
 		return "图片生成请求格式无效，请重试。", true, nil
 	}
-	if call.Name != tools.GenerateImageToolName && call.Name != tools.GenerateVideoToolName {
+	if !supportedTextToolCall(call.Name) {
 		log.WarnfCtx(ctx, "[ToolMarkup] blocked unsupported text tool call: %s", call.Name)
 		return "模型返回了不受支持的工具调用，请重试。", true, nil
 	}
@@ -60,11 +61,21 @@ func executeTextToolMarkup(ctx context.Context, content string, available []tool
 		return result, true, nil
 	}
 
-	log.WarnfCtx(ctx, "[ToolMarkup] %s is unavailable because the Agent has no matching media model", call.Name)
+	log.WarnfCtx(ctx, "[ToolMarkup] requested tool is unavailable: %s", call.Name)
 	if call.Name == tools.GenerateVideoToolName {
 		return "当前 Agent 未绑定视频生成模型，请先在 Agent 设置中选择视频模型。", true, nil
 	}
 	return "当前 Agent 未绑定图片生成模型，请先在 Agent 设置中选择图片模型。", true, nil
+}
+
+func supportedTextToolCall(name string) bool {
+	switch name {
+	case tools.GenerateImageToolName, tools.GenerateVideoToolName,
+		capability.ModelName(capability.ImageGenerate), capability.ModelName(capability.VideoGenerate):
+		return true
+	default:
+		return false
+	}
 }
 
 func parseTextToolCall(content string) (*textToolCall, bool, error) {

@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/good-fish-man/agent-runtime/internal/constant"
-	"github.com/good-fish-man/agent-runtime/log"
+	log "github.com/good-fish-man/logx"
 )
 
 var httpTraceHeaderCandidates = []string{

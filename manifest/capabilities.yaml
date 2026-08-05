@@ -1,0 +1,93 @@
+capabilities:
+  - id: internet.search
+    description: Search public web pages
+    input:
+      query: string
+      count: integer
+    output: SearchResult[]
+
+  - id: internet.fetch
+    description: Fetch webpage content
+    input:
+      url: string
+    output: Markdown
+
+  - id: browser.open
+    description: Open a website or discoverable web service in a controllable browser session
+    input:
+      target: string
+    output: BrowserSession
+
+  - id: browser.navigate
+    description: Navigate an existing browser session to an exact URL
+    input:
+      session_id: string
+      url: string
+    output: BrowserObservation
+
+  - id: browser.observe
+    description: Observe URL, title, visible text, snapshot, and key elements for a browser session
+    input:
+      session_id: string
+    output: BrowserObservation
+
+  - id: browser.action
+    description: Click, type, press, or scroll using semantic refs from the latest browser snapshot
+    input:
+      session_id: string
+      action: string
+      ref: string
+      value: string
+    output: BrowserObservation
+
+  - id: browser.wait
+    description: Wait briefly for a browser session to finish loading or reacting
+    input:
+      session_id: string
+      milliseconds: integer
+    output: BrowserObservation
+
+  - id: browser.screenshot
+    description: Capture a screenshot of the current browser page
+    input:
+      session_id: string
+    output: BrowserScreenshot
+
+  - id: browser.download
+    description: Download a user-requested file by clicking a semantic browser ref
+    input:
+      session_id: string
+      ref: string
+      filename: string
+    output: BrowserDownload
+
+  - id: github.search
+    description: Search GitHub repositories
+    input:
+      query: string
+    output: GitHubRepository[]
+
+  - id: weather.current
+    description: Get current weather
+    input:
+      location: string
+    output: CurrentWeather
+
+  - id: maps.route
+    description: Calculate route
+    input:
+      origin: string
+      destination: string
+    output: Route
+
+  - id: filesystem.read
+    description: Read an authorized local project file
+    input:
+      file_path: string
+    output: string
+
+  - id: python.execute
+    description: Execute Python code in an isolated sandbox
+    input:
+      code: string
+    output: PythonResult

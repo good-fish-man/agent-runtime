@@ -5,6 +5,7 @@ import (
 	"github.com/good-fish-man/agent-runtime/internal/dispatcher"
 	"github.com/good-fish-man/agent-runtime/internal/eino"
 	"github.com/good-fish-man/agent-runtime/internal/types"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // newRunDispatcher builds a Dispatcher for a RunRequest, mapping the gRPC
@@ -32,6 +33,9 @@ func (s *Server) newAgentDispatcher(client *eino.Client, req *runtimev1.AgentReq
 			Temperature: model.GetTemperature(), MaxTokens: int(model.GetMaxTokens()), TopP: model.GetTopP(),
 			ExtraFields: protoExtraFields(model),
 		}
+	}
+	for _, configured := range req.GetCapabilities() {
+		tr.Capabilities = append(tr.Capabilities, types.CapabilityConfig{ID: configured.GetId(), Config: structMap(configured.GetConfig())})
 	}
 	return dispatcher.New(client, tr, projectDir(req.GetContext()), memInstruction, s.cfg.Dispatch)
 }
@@ -107,6 +111,10 @@ func toTypesRunRequest(req *runtimev1.RunRequest) *types.RunRequest {
 		})
 	}
 
+	for _, configured := range req.GetCapabilities() {
+		tr.Capabilities = append(tr.Capabilities, types.CapabilityConfig{ID: configured.GetId(), Config: structMap(configured.GetConfig())})
+	}
+
 	for _, ia := range req.GetInternalAgents() {
 		tr.InternalAgents = append(tr.InternalAgents, types.InternalAgentConfig{
 			ID:     ia.GetId(),
@@ -116,10 +124,10 @@ func toTypesRunRequest(req *runtimev1.RunRequest) *types.RunRequest {
 	}
 
 	for _, sa := range req.GetSubAgents() {
-		var toolNames []string
-		for _, t := range sa.GetTools() {
-			if n := t.GetName(); n != "" {
-				toolNames = append(toolNames, n)
+		var capabilityIDs []string
+		for _, configured := range sa.GetCapabilities() {
+			if id := configured.GetId(); id != "" {
+				capabilityIDs = append(capabilityIDs, id)
 			}
 		}
 		var subModel *types.ModelConfig
@@ -144,7 +152,7 @@ func toTypesRunRequest(req *runtimev1.RunRequest) *types.RunRequest {
 			Description:   sa.GetDescription(),
 			Prompt:        sa.GetPrompt(),
 			Model:         subModel,
-			Tools:         toolNames,
+			Capabilities:  capabilityIDs,
 			Skills:        subSkills,
 			MaxIterations: int(sa.GetMaxIterations()),
 			TimeoutMs:     int(sa.GetTimeoutMs()),
@@ -187,6 +195,13 @@ func protoExtraFields(model *runtimev1.ModelConfig) map[string]any {
 		return nil
 	}
 	return model.GetExtraFields().AsMap()
+}
+
+func structMap(value *structpb.Struct) map[string]any {
+	if value == nil {
+		return nil
+	}
+	return value.AsMap()
 }
 
 func systemPromptFromContext(ctx map[string]any) string {

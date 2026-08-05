@@ -62,17 +62,6 @@ type A2AAgentConfig struct {
 	RiskLevel string            `json:"risk_level"`
 }
 
-// ToolConfig 工具配置
-type ToolConfig struct {
-	Type        string            `json:"type"`
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	Endpoint    string            `json:"endpoint"`
-	Method      string            `json:"method"`
-	Headers     map[string]string `json:"headers"`
-	RiskLevel   string            `json:"risk_level"`
-}
-
 // InternalAgentConfig 内部 Agent 配置
 type InternalAgentConfig struct {
 	ID     string      `json:"id"`
@@ -211,12 +200,17 @@ type RunRequest struct {
 	MCPs           []MCPConfig            `json:"mcps"`
 	CLIs           []CLIConfig            `json:"clis"` // CLI 工具配置（如飞书 CLI）
 	A2A            []A2AAgentConfig       `json:"a2a"`
-	Tools          []ToolConfig           `json:"tools"`
+	Capabilities   []CapabilityConfig     `json:"capabilities,omitempty"`
 	InternalAgents []InternalAgentConfig  `json:"internal_agents"`
 	SubAgents      []SubAgentConfig       `json:"sub_agents"` // Sub-Agent 配置列表
 	Options        *RunOptions            `json:"options"`
 	Sandbox        *SandboxConfig         `json:"sandbox"`
 	Files          []FileConfig           `json:"files"` // 上传的文件列表
+}
+
+type CapabilityConfig struct {
+	ID     string         `json:"id"`
+	Config map[string]any `json:"config,omitempty"`
 }
 
 // KnowledgeBaseConfig 知识库配置
@@ -367,7 +361,7 @@ type SubAgentConfig struct {
 	Description   string       `json:"description"`
 	Prompt        string       `json:"prompt"`
 	Model         *ModelConfig `json:"model,omitempty"`
-	Tools         []string     `json:"tools"`
+	Capabilities  []string     `json:"capabilities,omitempty"`
 	Skills        []Skill      `json:"skills,omitempty"`
 	MaxIterations int          `json:"max_iterations"`
 	TimeoutMs     int          `json:"timeout_ms"`

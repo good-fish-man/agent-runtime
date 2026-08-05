@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/good-fish-man/agent-runtime/internal/constant"
-	"github.com/good-fish-man/agent-runtime/log"
+	log "github.com/good-fish-man/logx"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

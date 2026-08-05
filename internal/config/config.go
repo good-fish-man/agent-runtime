@@ -100,7 +100,7 @@ func Default() Config {
 			LogMode:         4,
 		},
 		Memory: MemoryConfig{
-			Enabled:          false,
+			Enabled:          true,
 			AutoMigrate:      true,
 			BackgroundReview: true,
 			MaxReviewMemory:  constant.DefaultMaxReviewMemory,

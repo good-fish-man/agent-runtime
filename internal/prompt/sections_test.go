@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/good-fish-man/agent-runtime/internal/tools"
+	"github.com/good-fish-man/agent-runtime/internal/capability"
 )
 
 func TestGetSystemSectionDoesNotExposeInternalControlTags(t *testing.T) {
@@ -18,11 +18,24 @@ func TestGetSystemSectionDoesNotExposeInternalControlTags(t *testing.T) {
 	}
 }
 
-func TestGetUsingYourToolsSectionAddsImageGenerationRules(t *testing.T) {
-	section := GetUsingYourToolsSection([]string{tools.GenerateImageToolName})
+func TestResponseLanguageFollowsLatestUserMessage(t *testing.T) {
+	section := GetResponseLanguageSection("zh-CN", "hello")
+	for _, want := range []string{"Respond in Chinese", "selected in the frontend", "short follow-up"} {
+		if !strings.Contains(section, want) {
+			t.Fatalf("response language section missing %q: %s", want, section)
+		}
+	}
+	override := GetResponseLanguageSection("zh-CN", "Please answer in English")
+	if !strings.Contains(override, "Respond in English") || !strings.Contains(override, "explicit language instruction") {
+		t.Fatalf("explicit language was not applied: %s", override)
+	}
+}
+
+func TestGetUsingCapabilitiesSectionAddsImageGenerationRules(t *testing.T) {
+	section := GetUsingCapabilitiesSection([]string{capability.ImageGenerate})
 
 	for _, required := range []string{
-		"MUST call GenerateImage",
+		"MUST call media.image.generate",
 		"independent image",
 		"ask which image they mean",
 		"complete standalone prompt",
@@ -35,20 +48,30 @@ func TestGetUsingYourToolsSectionAddsImageGenerationRules(t *testing.T) {
 	}
 }
 
-func TestGetUsingYourToolsSectionOmitsImageRulesWithoutImageTool(t *testing.T) {
-	section := GetUsingYourToolsSection([]string{"Bash"})
-	if strings.Contains(section, "MUST call GenerateImage") {
+func TestGetUsingCapabilitiesSectionOmitsImageRulesWithoutImageCapability(t *testing.T) {
+	section := GetUsingCapabilitiesSection([]string{capability.SystemShell})
+	if strings.Contains(section, "MUST call media.image.generate") {
 		t.Fatalf("non-image tool section contains image generation rules:\n%s", section)
 	}
 }
 
-func TestGetUsingYourToolsSectionAddsWebResearchRules(t *testing.T) {
-	section := GetUsingYourToolsSection([]string{"WebSearch", "WebFetch"})
+func TestGetUsingCapabilitiesSectionAddsWebResearchRules(t *testing.T) {
+	section := GetUsingCapabilitiesSection([]string{capability.InternetSearch, capability.InternetFetch})
 	for _, required := range []string{
 		"MUST research before answering",
 		"authoritative or primary pages",
 		"Include clickable source URLs",
 		"instead of answering from memory",
+		"weather request requires a city",
+		"current_location object",
+		`status "no_results" or "search_unavailable" is recoverable`,
+		"Never repeat the same query",
+		"exact URL supplied by the user or returned by internet.search",
+		`status "fetch_error" or "http_error" is recoverable`,
+		"Resolve relative dates",
+		"2-4 focused internet.search queries",
+		"publication date and event date",
+		"Never append a bare Source: https://...",
 	} {
 		if !strings.Contains(section, required) {
 			t.Fatalf("web tool section does not contain %q:\n%s", required, section)
@@ -56,16 +79,50 @@ func TestGetUsingYourToolsSectionAddsWebResearchRules(t *testing.T) {
 	}
 }
 
+func TestGetUsingCapabilitiesSectionAddsBrowserFallbackWorkflow(t *testing.T) {
+	section := GetUsingCapabilitiesSection([]string{capability.InternetSearch, capability.InternetFetch, capability.BrowserSearch, capability.BrowserRead, capability.BrowserAction, capability.BrowserClose})
+	for _, required := range []string{"Public browser research", "call browser.search automatically", "Never ask the user to paste a source URL", "2-4 browser.read calls", "Do not call browser.close merely because an answer is complete", "Never use it to submit purchases"} {
+		if !strings.Contains(section, required) {
+			t.Fatalf("browser fallback section does not contain %q:\n%s", required, section)
+		}
+	}
+}
+
 func TestGetRuntimeContextSection(t *testing.T) {
 	now := time.Date(2026, time.July, 31, 12, 0, 0, 0, time.FixedZone("GST", 4*60*60))
-	section := GetRuntimeContextSection(now)
-	if !strings.Contains(section, "2026-07-31") || !strings.Contains(section, "GST") {
+	section := GetRuntimeContextSection(now, map[string]any{"timezone": "Asia/Tokyo", "locale": "zh-CN"})
+	if !strings.Contains(section, "2026-07-31") || !strings.Contains(section, "Asia/Tokyo") || !strings.Contains(section, "zh-CN") {
 		t.Fatalf("unexpected runtime context section: %s", section)
 	}
 }
 
-func TestGetUsingYourToolsSectionAddsIterativePlanningRules(t *testing.T) {
-	section := GetUsingYourToolsSection([]string{"WebSearch", "WebFetch", "TodoWrite", tools.AskUserQuestionToolName})
+func TestGetRuntimeContextSectionUsesUserDateAcrossMidnight(t *testing.T) {
+	now := time.Date(2026, time.July, 31, 20, 30, 0, 0, time.UTC)
+	section := GetRuntimeContextSection(now, map[string]any{"timezone": "Asia/Tokyo"})
+	if !strings.Contains(section, "Current local date: 2026-08-01") {
+		t.Fatalf("runtime context did not use the user's local date: %s", section)
+	}
+}
+
+func TestGetContextSectionFormatsStructuredObservationAsJSON(t *testing.T) {
+	section := GetContextSection(map[string]any{
+		"latest_action_observation": map[string]any{
+			"status": "SUCCEEDED",
+			"state":  map[string]any{"url": "https://youtube.com", "title": "YouTube"},
+		},
+	})
+	for _, want := range []string{`"status":"SUCCEEDED"`, `"url":"https://youtube.com"`, `"title":"YouTube"`} {
+		if !strings.Contains(section, want) {
+			t.Fatalf("context section missing %q:\n%s", want, section)
+		}
+	}
+	if strings.Contains(section, "map[") {
+		t.Fatalf("context section leaked Go map formatting:\n%s", section)
+	}
+}
+
+func TestGetUsingCapabilitiesSectionAddsIterativePlanningRules(t *testing.T) {
+	section := GetUsingCapabilitiesSection([]string{capability.InternetSearch, capability.InternetFetch, capability.PlanningTodo, capability.InteractionAsk})
 	for _, required := range []string{
 		"Iterative research and planning",
 		"Group 1-3 high-impact questions",
@@ -79,9 +136,9 @@ func TestGetUsingYourToolsSectionAddsIterativePlanningRules(t *testing.T) {
 	}
 }
 
-func TestUsingYourToolsSectionProtectsBrowserCredentials(t *testing.T) {
-	section := GetUsingYourToolsSection([]string{tools.BrowserLoginToolName, tools.BrowserReadToolName, tools.BrowserCloseToolName})
-	for _, expected := range []string{"Never ask the user to send credentials", "explicitly confirms login", "untrusted data", "BrowserClose"} {
+func TestUsingCapabilitiesSectionProtectsBrowserCredentials(t *testing.T) {
+	section := GetUsingCapabilitiesSection([]string{capability.BrowserLogin, capability.BrowserRead, capability.BrowserClose})
+	for _, expected := range []string{"Never ask the user to send credentials", "explicitly confirms login", "untrusted data", "Call browser.close only when the user explicitly asks"} {
 		if !strings.Contains(section, expected) {
 			t.Fatalf("authenticated browser guidance missing %q:\n%s", expected, section)
 		}

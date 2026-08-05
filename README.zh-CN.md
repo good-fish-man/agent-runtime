@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+架构设计：[Athena Agent Architecture v2](doc/architecture-v2.md) | [Personal AI Operating System Specification v1.0](doc/personal-ai-os-spec-v1.md)
+
 Athena Agent Runtime 是 Athena Agent 平台的执行与编排引擎。它通过 gRPC 或 HTTP 接收结构化 Agent 请求，按相关性选择工具和 Skills，调用语言或图片模型，协调 Sub-Agents，并将类型化执行事件流式返回给调用方。
 
 本仓库只包含 Runtime。用户、模型绑定、Agent、API Key 和浏览器管理界面由 [`agent-runtime-client`](https://github.com/good-fish-man/agent-runtime-client) 与 [`athena-agent-ui`](https://github.com/good-fish-man/athena-agent-ui) 提供。
@@ -27,6 +29,8 @@ flowchart LR
     Transport --> Server["Runtime Server"]
     Server --> Dispatcher["Dispatcher 编排器"]
     Dispatcher --> Selector["能力相关性选择"]
+    Dispatcher --> Research["确定性研究任务执行器"]
+    Research --> Web["并行搜索与来源核验"]
     Selector --> Skills["Skills 与检索"]
     Selector --> Tools["内置工具"]
     Selector --> SubAgents["Sub-Agents"]
@@ -42,8 +46,9 @@ flowchart LR
 1. 接入层接收请求，并把 `X-Trace-Id` 传入 gRPC metadata 和 context。
 2. Server 解析模型配置，并按需加载长期记忆。
 3. Dispatcher 为当前请求选择相关 Tools 和最多若干个最相关 Skills。
-4. Eino Runner 执行模型/工具循环，并在配置后协调 Sub-Agents。
-5. 返回完整结果，或返回 `meta`、`delta`、`tool_call`、`error`、`done` 等流式事件。
+4. 新闻、旅行、对比或显式调研请求会先进入研究任务执行器：生成带日期和语言区域的有限查询计划，并行检索、打开不同来源，再把已核验的证据交给模型推理。
+5. Eino Runner 执行模型/工具循环，并在配置后协调 Sub-Agents。
+6. 返回完整结果，或返回 `meta`、`delta`、`tool_call`、`error`、`done` 等流式事件。
 
 ## 环境要求
 
@@ -123,6 +128,7 @@ memory:
 skills:
   dir: "skills"
   config_path: "config/skills-config.yaml"
+
 ```
 
 数据库启用时，长期记忆默认开启。Athena Launcher 会自动安装并配置 PostgreSQL；独立部署时还需要设置 `db.enabled: true` 并提供可连接的数据库。数据库不可用时，runtime 会记录连接错误并降级为无持久记忆模式，不会阻止基础对话服务启动。
@@ -136,17 +142,29 @@ skills:
 | `DEFAULT_MODEL`、`DEFAULT_API_KEY`、`DEFAULT_API_BASE` | 兜底模型配置 |
 | `SKILLS_DIR`、`GLOBAL_SKILLS_DIR`、`SKILLS_CONFIG_PATH` | Skills 路径 |
 | `ATHENA_AGENT_BROWSER_BIN` | Athena Launcher 安装并校验的 `agent-browser` 可执行文件 |
+| `ATHENA_INTERNAL_SERVICE_TOKEN` | 仅用于 Runtime 向 Client 创建任务的本机共享令牌 |
+| `ATHENA_RUNTIME_CLIENT_INTERNAL_URL` | 内部定时任务地址，默认使用本机 Client `:8090` |
 | `SANDBOX_IMAGE` | 默认沙箱镜像 |
 
 不要提交 API Key。完整平台中，模型凭据由 `agent-runtime-client` 解析，只通过服务间请求传递给 Runtime。
 
 ## 内置能力
 
+Runtime 以供应商无关的能力注册取代实现工具名配置。`internet.search`、`internet.fetch`、`filesystem.read` 等稳定 ID 会在执行时解析为模型可调用的适配器（如 `internet_search`）。`GET /capabilities` 返回能力目录、输入输出、风险、Provider 和可用状态。请求与 Sub-Agent 只能通过 `capabilities` 配置能力，具体工具仅作为 Runtime 内部 Provider。
+
 Runtime 可按需选择 `Glob`、`Grep`、`Read`、`Edit`、`Write`、`Bash`、联网搜索、计划、任务和提问工具。公开发行包包含浏览器自动化、CSV 分析、MarkItDown、S3 上传和 Skill 创建等 Skills。仓库中的 PowerPoint Skill 受第三方条款限制，不会进入公开发行包。
 
 Tools 和 Skills 会根据当前描述与最近上下文进行筛选。文件工具的访问范围由请求中的 `project_dir` 限定。
 
-需要登录的网页由 `BrowserLogin`、`BrowserRead` 和 `BrowserClose` 处理。`BrowserLogin` 会打开用户可见的隔离浏览器会话，用户在浏览器中完成密码、验证码、二次验证或扫码登录。账号密码和 Cookie 不会作为工具参数传输。Athena Launcher 会安装原生浏览器 CLI；独立开发环境可以自行安装 `agent-browser` 或设置 `ATHENA_AGENT_BROWSER_BIN`。
+`DesktopAction` 不会访问 Runtime 所在主机。它只向 Athena 桌面端返回结构化请求，由桌面端在用户明确授权的本地目录中查询文件，或按名称打开已安装应用，再把结果回传给 Agent。该设计同样支持远程 Runtime，并且初始请求不会上传授权目录路径。
+
+研究型请求不再只依赖模型自行判断是否联网。Dispatcher 会先执行代码控制的检索阶段：解析用户本地日期，生成有预算上限的查询计划，并行搜索，对域名和 URL 去重，打开有限数量的来源，并把单个来源失败记录为覆盖率不足而不是终止整次回答。用户取消请求仍会立即终止执行。网页证据在进入模型前会被截断，并明确标记为不可信页面内容。
+
+检索阶段以代码方式实现 Agent Protocol v1.0：单次最多搜索 2 次、抓取 3 个网页、规划 6 轮、执行 20 秒；搜索缓存 5 分钟，网页缓存 1 小时。每次工具调用都会转换为精简的 Observation，记录状态、耗时、摘要、可信度、缓存命中和错误码。来源按可解释的域名可信度排序，只有压缩后的事实、准确 URL、时间和 Observation 会进入模型上下文。达到限制时，Runtime 会基于已经取得的最佳证据回答，不会继续无边界调用工具。
+
+公开网页研究使用 `BrowserSearch`、`BrowserRead`、`BrowserAction` 和 `BrowserClose`，在轻量搜索被拦截时自动切换到真实浏览器，发现真实结果链接、打开来源网页，并且只允许有限的可逆导航。遇到认证页面时切换到 `BrowserLogin`，由用户自行完成密码、验证码、二次验证或扫码登录；账号密码和 Cookie 不会作为工具参数传输。Athena Launcher 会安装原生浏览器 CLI；独立开发环境必须自行安装 `agent-browser` 或设置 `ATHENA_AGENT_BROWSER_BIN`。
+
+`ScheduledTaskCreate` 支持用户在聊天中创建持久化的票务、商品库存和已明确选择的号源监控。后台执行只允许只读联网工具；购买、预订、挂号提交、验证码、排队和付款必须由用户在交互式会话中确认。
 
 ## 开发
 

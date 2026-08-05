@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/good-fish-man/agent-runtime/internal/types"
-	"github.com/good-fish-man/agent-runtime/log"
+	log "github.com/good-fish-man/logx"
 )
 
 // LoadSkills builds the effective skill set for a run. It starts from the

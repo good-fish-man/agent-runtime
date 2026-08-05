@@ -10,16 +10,19 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	runtimev1 "github.com/good-fish-man/agent-runtime/gen/agent/runtime/v1"
+	"github.com/good-fish-man/agent-runtime/internal/actionprotocol"
+	"github.com/good-fish-man/agent-runtime/internal/capability"
 	"github.com/good-fish-man/agent-runtime/internal/constant"
 	"github.com/good-fish-man/agent-runtime/internal/dispatcher"
 	"github.com/good-fish-man/agent-runtime/internal/eino"
 	"github.com/good-fish-man/agent-runtime/internal/memory"
 	"github.com/good-fish-man/agent-runtime/internal/tools"
 	"github.com/good-fish-man/agent-runtime/internal/types"
-	"github.com/good-fish-man/agent-runtime/log"
+	log "github.com/good-fish-man/logx"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -370,6 +373,22 @@ func (s *Server) HealthCheck(ctx context.Context, req *runtimev1.HealthCheckRequ
 	}, nil
 }
 
+// ListCapabilities returns the provider-independent Runtime ability catalog.
+func (s *Server) ListCapabilities(ctx context.Context, req *runtimev1.ListCapabilitiesRequest) (*runtimev1.ListCapabilitiesResponse, error) {
+	_, traceID, release := s.bindTrace(ctx, req.GetTraceId())
+	defer release()
+	definitions := capability.GlobalRegistry.List()
+	items := make([]*runtimev1.CapabilityDefinition, 0, len(definitions))
+	for _, definition := range definitions {
+		items = append(items, &runtimev1.CapabilityDefinition{
+			Id: definition.ID, Description: definition.Description, Input: definition.Input,
+			Output: definition.Output, ReadOnly: definition.ReadOnly, Risk: definition.Risk,
+			Status: string(definition.Status), Provider: definition.Provider, Reason: definition.Reason,
+		})
+	}
+	return &runtimev1.ListCapabilitiesResponse{Capabilities: items, TraceId: traceID}, nil
+}
+
 // ---- streaming RPCs ----
 
 func (s *Server) streamCompletion(
@@ -383,7 +402,10 @@ func (s *Server) streamCompletion(
 	send func(*runtimev1.StreamEvent) error,
 ) error {
 	var seq int64
+	var emitMu sync.Mutex
 	emit := func(ev *runtimev1.StreamEvent) error {
+		emitMu.Lock()
+		defer emitMu.Unlock()
 		ev.Seq = seq
 		ev.TraceId = traceID
 		ev.EmittedAt = timestamppb.Now()
@@ -401,14 +423,58 @@ func (s *Server) streamCompletion(
 		return log.WrapError(err, "Server.streamCompletion.emitMeta")
 	}
 
-	res, err := disp.RunStream(ctx, prompt, msgs, func(ch eino.StreamChunk) error {
+	runCtx, cancelRun := context.WithCancel(actionprotocol.WithScope(ctx, traceID))
+	heartbeatDone := make(chan struct{})
+	var heartbeatErr error
+	go func() {
+		defer close(heartbeatDone)
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-runCtx.Done():
+				return
+			case <-ticker.C:
+				if err := emit(&runtimev1.StreamEvent{
+					Payload: &runtimev1.StreamEvent_Meta{Meta: &runtimev1.MetaEvent{
+						HeartbeatAt: timestamppb.Now(),
+					}},
+				}); err != nil {
+					heartbeatErr = log.WrapError(err, "Server.streamCompletion.emitHeartbeat")
+					cancelRun()
+					return
+				}
+			}
+		}
+	}()
+
+	res, err := disp.RunStream(runCtx, prompt, msgs, func(ch eino.StreamChunk) error {
 		return emit(&runtimev1.StreamEvent{
 			Payload: &runtimev1.StreamEvent_Delta{Delta: &runtimev1.DeltaEvent{
 				Text: ch.Text,
 				Role: constant.RoleAssistant,
 			}},
 		})
+	}, func(action actionprotocol.Action) error {
+		payload, payloadErr := structpb.NewStruct(map[string]any{
+			"protocol": action.Protocol, "type": action.Type, "task_id": action.TaskID,
+			"action_id": action.ActionID, "session_id": action.SessionID, "sequence": action.Sequence,
+			"idempotency_key": action.IdempotencyKey, "deadline": action.Deadline.Format(time.RFC3339Nano),
+			"capability": action.Capability, "arguments": action.Arguments,
+			"policy": map[string]any{"risk": action.Policy.Risk, "decision": action.Policy.Decision},
+		})
+		if payloadErr != nil {
+			return payloadErr
+		}
+		return emit(&runtimev1.StreamEvent{Payload: &runtimev1.StreamEvent_ToolResult{ToolResult: &runtimev1.ToolResultEvent{
+			Id: action.ActionID, Tool: "client.action", Output: payload, Success: true,
+		}}})
 	})
+	cancelRun()
+	<-heartbeatDone
+	if err == nil && heartbeatErr != nil {
+		err = heartbeatErr
+	}
 	if err != nil {
 		_ = emit(&runtimev1.StreamEvent{
 			Payload: &runtimev1.StreamEvent_Error{Error: &runtimev1.ErrorEvent{

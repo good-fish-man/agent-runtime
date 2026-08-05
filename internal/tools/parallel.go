@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/good-fish-man/agent-runtime/log"
+	log "github.com/good-fish-man/logx"
 )
 
 // ParallelToolExecutor 并行执行工具的帮助类

@@ -2,8 +2,11 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/good-fish-man/agent-runtime/internal/actionprotocol"
 )
 
 func TestBrowserLoginValidation(t *testing.T) {
@@ -42,10 +45,17 @@ func TestBrowserSessionIDIsOpaqueAndValidated(t *testing.T) {
 	}
 }
 
-func TestBrowserReadRejectsUnknownSession(t *testing.T) {
-	_, err := NewBrowserReadTool().InvokableRun(context.Background(), `{"session_id":"athena-00000000000000000000000000000000"}`)
-	if err == nil || !strings.Contains(err.Error(), "unknown or expired") {
-		t.Fatalf("unexpected error: %v", err)
+func TestBrowserReadDelegatesSessionToClientController(t *testing.T) {
+	result, err := NewBrowserReadTool().InvokableRun(context.Background(), `{"session_id":"athena-00000000000000000000000000000000"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var request actionprotocol.Action
+	if err := json.Unmarshal([]byte(result), &request); err != nil {
+		t.Fatal(err)
+	}
+	if request.Protocol != actionprotocol.Protocol || request.Capability != "browser.observe" || request.Policy.Decision != actionprotocol.Allow {
+		t.Fatalf("unexpected browser request: %+v", request)
 	}
 }
 

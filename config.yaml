@@ -12,19 +12,21 @@ db:
   enabled: true
   db_type: "postgres"
   username: "postgres"
-  password: ""
+  password: "a123456"
   db_host: "localhost"
   db_port: 5432
   db_name: "agent_runtime"
   ssl_mode: "disable"
 
 memory:
-  enabled: false
+  enabled: true
   auto_migrate: true
   inject_into_prompt: true
   background_review: true
   max_review_memory: 10
 
+# Host file search and application launch. Enable only on a trusted local
+# desktop installation; keep disabled on shared or remotely hosted runtimes.
 skills:
   dir: "skills"
   config_path: "config/skills-config.yaml"

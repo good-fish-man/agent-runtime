@@ -20,7 +20,7 @@ import (
 
 	"github.com/good-fish-man/agent-runtime/internal/constant"
 	"github.com/good-fish-man/agent-runtime/internal/types"
-	"github.com/good-fish-man/agent-runtime/log"
+	log "github.com/good-fish-man/logx"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
@@ -254,8 +254,8 @@ func (t *ImageGenerationTool) generateStability(ctx context.Context, input Image
 
 func (t *ImageGenerationTool) generateDiffusers(ctx context.Context, input ImageGenerationRequest) (string, error) {
 	python := diffusersPython()
-	modelDir := filepath.Join(athenaDir(), "models", "diffusers", strings.ReplaceAll(t.model.Name, "/", "--"))
-	if _, err := os.Stat(filepath.Join(modelDir, ".athena_complete")); err != nil {
+	modelDir := diffusersModelDir(t.model.Name)
+	if _, err := os.Stat(filepath.Join(modelDir, constant.DiffusersCompleteFileName)); err != nil {
 		return "", fmt.Errorf("local image model is not downloaded: %s", t.model.Name)
 	}
 	if err := ensureDiffusersWeightAliases(modelDir); err != nil {
@@ -292,8 +292,8 @@ result.save(output)`
 
 func (t *ImageGenerationTool) editDiffusers(ctx context.Context, input ImageGenerationRequest) (string, error) {
 	python := diffusersPython()
-	modelDir := filepath.Join(athenaDir(), "models", "diffusers", strings.ReplaceAll(t.model.Name, "/", "--"))
-	if _, err := os.Stat(filepath.Join(modelDir, ".athena_complete")); err != nil {
+	modelDir := diffusersModelDir(t.model.Name)
+	if _, err := os.Stat(filepath.Join(modelDir, constant.DiffusersCompleteFileName)); err != nil {
 		return "", fmt.Errorf("local image model is not downloaded: %s", t.model.Name)
 	}
 	filename := generatedFilename(".png")
@@ -369,19 +369,23 @@ func ensureDiffusersWeightAliases(modelDir string) error {
 func athenaDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(os.TempDir(), "athena")
+		return filepath.Join(os.TempDir(), constant.DefaultAthenaTempDirName)
 	}
-	return filepath.Join(home, ".athena")
+	return filepath.Join(home, constant.DefaultAthenaHomeDirName)
+}
+
+func diffusersModelDir(model string) string {
+	return filepath.Join(athenaDir(), constant.DirModels, constant.DirDiffusers, strings.ReplaceAll(model, "/", "--"))
 }
 
 func diffusersPython() string {
 	if runtime.GOOS == "windows" {
-		return filepath.Join(athenaDir(), "image-runtime", "venv", "Scripts", "python.exe")
+		return filepath.Join(athenaDir(), constant.DirImageRuntime, constant.DirVenv, "Scripts", "python.exe")
 	}
-	return filepath.Join(athenaDir(), "image-runtime", "venv", "bin", "python")
+	return filepath.Join(athenaDir(), constant.DirImageRuntime, constant.DirVenv, "bin", "python")
 }
 
-func GeneratedImagesDir() string { return filepath.Join(athenaDir(), "generated-images") }
+func GeneratedImagesDir() string { return filepath.Join(athenaDir(), constant.DirGeneratedImages) }
 
 // GeneratedImageHandler serves only random generated files and never lists the directory.
 func GeneratedImageHandler(w http.ResponseWriter, r *http.Request) {
@@ -405,11 +409,11 @@ func generatedFilename(ext string) string {
 }
 
 func generatedPublicURL(filename string) string {
-	base := strings.TrimRight(os.Getenv("AGENT_RUNTIME_PUBLIC_URL"), "/")
+	base := strings.TrimRight(os.Getenv(constant.EnvRuntimePublicURL), "/")
 	if base == "" {
-		base = "http://127.0.0.1:18081"
+		base = constant.DefaultRuntimePublicURL
 	}
-	return base + "/generated/" + filename
+	return base + constant.RouteGenerated + "/" + filename
 }
 
 func saveGeneratedImage(data []byte, ext string) (string, error) {

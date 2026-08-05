@@ -8,7 +8,7 @@ import (
 	"github.com/good-fish-man/agent-runtime/internal/constant"
 	"github.com/good-fish-man/agent-runtime/internal/plugins"
 	"github.com/good-fish-man/agent-runtime/internal/types"
-	"github.com/good-fish-man/agent-runtime/log"
+	log "github.com/good-fish-man/logx"
 
 	"github.com/cloudwego/eino/components/tool"
 )

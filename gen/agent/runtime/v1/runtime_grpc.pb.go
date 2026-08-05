@@ -19,14 +19,15 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AgentRuntime_Run_FullMethodName            = "/agent.runtime.v1.AgentRuntime/Run"
-	AgentRuntime_RunStream_FullMethodName      = "/agent.runtime.v1.AgentRuntime/RunStream"
-	AgentRuntime_RunAgent_FullMethodName       = "/agent.runtime.v1.AgentRuntime/RunAgent"
-	AgentRuntime_RunAgentStream_FullMethodName = "/agent.runtime.v1.AgentRuntime/RunAgentStream"
-	AgentRuntime_GenerateMedia_FullMethodName  = "/agent.runtime.v1.AgentRuntime/GenerateMedia"
-	AgentRuntime_Resume_FullMethodName         = "/agent.runtime.v1.AgentRuntime/Resume"
-	AgentRuntime_Stop_FullMethodName           = "/agent.runtime.v1.AgentRuntime/Stop"
-	AgentRuntime_HealthCheck_FullMethodName    = "/agent.runtime.v1.AgentRuntime/HealthCheck"
+	AgentRuntime_Run_FullMethodName              = "/agent.runtime.v1.AgentRuntime/Run"
+	AgentRuntime_RunStream_FullMethodName        = "/agent.runtime.v1.AgentRuntime/RunStream"
+	AgentRuntime_RunAgent_FullMethodName         = "/agent.runtime.v1.AgentRuntime/RunAgent"
+	AgentRuntime_RunAgentStream_FullMethodName   = "/agent.runtime.v1.AgentRuntime/RunAgentStream"
+	AgentRuntime_GenerateMedia_FullMethodName    = "/agent.runtime.v1.AgentRuntime/GenerateMedia"
+	AgentRuntime_Resume_FullMethodName           = "/agent.runtime.v1.AgentRuntime/Resume"
+	AgentRuntime_Stop_FullMethodName             = "/agent.runtime.v1.AgentRuntime/Stop"
+	AgentRuntime_HealthCheck_FullMethodName      = "/agent.runtime.v1.AgentRuntime/HealthCheck"
+	AgentRuntime_ListCapabilities_FullMethodName = "/agent.runtime.v1.AgentRuntime/ListCapabilities"
 )
 
 // AgentRuntimeClient is the client API for AgentRuntime service.
@@ -45,6 +46,7 @@ type AgentRuntimeClient interface {
 	Resume(ctx context.Context, in *ResumeRequest, opts ...grpc.CallOption) (*ResumeResponse, error)
 	Stop(ctx context.Context, in *StopRequest, opts ...grpc.CallOption) (*StopResponse, error)
 	HealthCheck(ctx context.Context, in *HealthCheckRequest, opts ...grpc.CallOption) (*HealthCheckResponse, error)
+	ListCapabilities(ctx context.Context, in *ListCapabilitiesRequest, opts ...grpc.CallOption) (*ListCapabilitiesResponse, error)
 }
 
 type agentRuntimeClient struct {
@@ -153,6 +155,16 @@ func (c *agentRuntimeClient) HealthCheck(ctx context.Context, in *HealthCheckReq
 	return out, nil
 }
 
+func (c *agentRuntimeClient) ListCapabilities(ctx context.Context, in *ListCapabilitiesRequest, opts ...grpc.CallOption) (*ListCapabilitiesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListCapabilitiesResponse)
+	err := c.cc.Invoke(ctx, AgentRuntime_ListCapabilities_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentRuntimeServer is the server API for AgentRuntime service.
 // All implementations must embed UnimplementedAgentRuntimeServer
 // for forward compatibility.
@@ -169,6 +181,7 @@ type AgentRuntimeServer interface {
 	Resume(context.Context, *ResumeRequest) (*ResumeResponse, error)
 	Stop(context.Context, *StopRequest) (*StopResponse, error)
 	HealthCheck(context.Context, *HealthCheckRequest) (*HealthCheckResponse, error)
+	ListCapabilities(context.Context, *ListCapabilitiesRequest) (*ListCapabilitiesResponse, error)
 	mustEmbedUnimplementedAgentRuntimeServer()
 }
 
@@ -202,6 +215,9 @@ func (UnimplementedAgentRuntimeServer) Stop(context.Context, *StopRequest) (*Sto
 }
 func (UnimplementedAgentRuntimeServer) HealthCheck(context.Context, *HealthCheckRequest) (*HealthCheckResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method HealthCheck not implemented")
+}
+func (UnimplementedAgentRuntimeServer) ListCapabilities(context.Context, *ListCapabilitiesRequest) (*ListCapabilitiesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListCapabilities not implemented")
 }
 func (UnimplementedAgentRuntimeServer) mustEmbedUnimplementedAgentRuntimeServer() {}
 func (UnimplementedAgentRuntimeServer) testEmbeddedByValue()                      {}
@@ -354,6 +370,24 @@ func _AgentRuntime_HealthCheck_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentRuntime_ListCapabilities_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListCapabilitiesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentRuntimeServer).ListCapabilities(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentRuntime_ListCapabilities_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentRuntimeServer).ListCapabilities(ctx, req.(*ListCapabilitiesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentRuntime_ServiceDesc is the grpc.ServiceDesc for AgentRuntime service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -384,6 +418,10 @@ var AgentRuntime_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "HealthCheck",
 			Handler:    _AgentRuntime_HealthCheck_Handler,
+		},
+		{
+			MethodName: "ListCapabilities",
+			Handler:    _AgentRuntime_ListCapabilities_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -19,7 +19,7 @@ import (
 	"github.com/good-fish-man/agent-runtime/internal/constant"
 	"github.com/good-fish-man/agent-runtime/internal/tools"
 	"github.com/good-fish-man/agent-runtime/internal/types"
-	"github.com/good-fish-man/agent-runtime/log"
+	log "github.com/good-fish-man/logx"
 )
 
 // ========== Skill Runner ==========

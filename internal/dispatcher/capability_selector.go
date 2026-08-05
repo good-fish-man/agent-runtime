@@ -6,8 +6,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/good-fish-man/agent-runtime/internal/capability"
 	"github.com/good-fish-man/agent-runtime/internal/eino"
-	"github.com/good-fish-man/agent-runtime/internal/tools"
 	"github.com/good-fish-man/agent-runtime/internal/types"
 )
 
@@ -22,7 +22,21 @@ var (
 	commandKeywords = []string{
 		"运行", "执行", "测试", "构建", "编译", "安装", "启动", "命令", "终端", "run", "test", "build", "compile", "install", "start", "command", "terminal", "shell", "npm", "pnpm", "yarn", "go test", "docker",
 	}
-	webKeywords = []string{
+	localFileSearchKeywords = []string{
+		"本地文件", "电脑里的文件", "电脑上的文件", "硬盘里的文件", "下载目录", "文档目录", "桌面上的文件", "查找文件", "搜索文件",
+		"local file", "files on my computer", "find a file", "search my files", "downloads folder", "documents folder", "desktop file",
+	}
+	openApplicationKeywords = []string{
+		"打开软件", "启动软件", "打开应用", "启动应用", "运行应用", "播放音乐", "打开音乐", "打开计算器", "打开浏览器",
+		"打开网站", "打开网页", "打开网址",
+		"open app", "open application", "launch app", "launch application", "start application", "open music", "open calculator", "open website",
+	}
+	localFileActionKeywords = []string{"查找", "查询", "搜索", "找一下", "find", "search", "locate"}
+	localFilePlaceKeywords  = []string{"本地", "电脑", "硬盘", "下载目录", "文档目录", "桌面", "my computer", "local", "downloads", "documents", "desktop"}
+	localFileObjectKeywords = []string{"文件", "文档", "资料", "file", "document"}
+	openAppActionKeywords   = []string{"打开", "启动", "运行", "播放", "open", "launch", "start", "play"}
+	openAppObjectKeywords   = []string{"软件", "应用", "程序", "音乐", "计算器", "浏览器", "网站", "网页", "网址", "music", "calculator", "browser", "website", "app", "application"}
+	webKeywords             = []string{
 		"联网", "上网", "搜索网页", "网上查", "查询一下", "查一下", "查证", "核实", "验证信息", "官网", "官方文档", "来源", "出处", "引用", "链接",
 		"网站", "网址", "url", "http://", "https://", "web", "search", "search online", "look up", "browse", "website", "source", "citation", "official docs", "verify",
 	}
@@ -48,6 +62,16 @@ var (
 		"需要登录", "登录网站", "登录网页", "账号密码", "验证码", "扫码登录", "二维码登录", "两步验证", "二次验证", "登录完成", "已完成登录", "authentication_required", "session_id",
 		"requires login", "sign in", "log in", "password", "captcha", "scan qr", "qr login", "two-factor", "2fa", "login completed",
 	}
+	browserCloseKeywords = []string{
+		"关闭浏览器", "关闭网页", "关闭页面", "关闭标签页", "关掉浏览器", "关掉网页", "关掉页面",
+		"close browser", "close webpage", "close page", "close tab",
+	}
+	browserDownloadKeywords = []string{
+		"下载", "保存文件", "下载文件", "保存到本地", "download", "save file",
+	}
+	browserScreenshotKeywords = []string{
+		"截图", "截屏", "截一张图", "截个图", "页面截图", "浏览器截图", "screenshot", "screen shot", "capture page",
+	}
 	webExternalKnowledgeKeywords = []string{
 		"公司", "产品", "模型", "软件", "框架", "库", "api", "国家", "城市", "政府", "学校", "医院", "比赛", "电影", "餐厅", "酒店", "景点",
 		"company", "product", "model", "software", "framework", "library", "country", "city", "government", "school", "hospital", "game", "movie", "restaurant", "hotel",
@@ -63,6 +87,7 @@ var (
 		"子任务", "并行任务", "任务状态", "parallel task", "subtask", "delegate",
 	}
 	waitKeywords          = []string{"等待", "稍后", "sleep", "wait", "delay"}
+	scheduledTaskKeywords = []string{"定时", "周期查询", "持续查询", "到货提醒", "库存提醒", "抢票", "余票", "放票", "抢购", "秒杀", "挂号", "号源", "预约提醒", "每分钟", "每小时", "每天", "schedule", "scheduled", "monitor stock", "ticket availability", "appointment slot", "restock"}
 	skillCreationKeywords = []string{
 		"创建技能", "新增技能", "编写技能", "修改技能", "优化技能", "创建skill", "新增skill", "create skill", "build skill", "improve skill", "update skill",
 	}
@@ -81,7 +106,7 @@ func capabilityText(userPrompt string, msgs []eino.ChatMessage) string {
 	return strings.ToLower(strings.Join(parts, "\n"))
 }
 
-func selectBuiltinTools(text string, hasFiles bool) []string {
+func selectBuiltinCapabilities(text string, hasFiles bool) []string {
 	selected := make([]string, 0, 10)
 	seen := map[string]bool{}
 	add := func(names ...string) {
@@ -94,30 +119,53 @@ func selectBuiltinTools(text string, hasFiles bool) []string {
 	}
 
 	// Keep one escape hatch for genuinely ambiguous requests.
-	add("AskUserQuestion")
+	add(capability.InteractionAsk)
 	if hasFiles || matchesAny(text, codeReadKeywords) {
-		add("Glob", "Grep", "Read")
+		add(capability.FilesystemList, capability.FilesystemSearch, capability.FilesystemRead)
 	}
 	if matchesAny(text, codeWriteKeywords) {
-		add("Glob", "Grep", "Read", "Edit", "Write")
+		add(capability.FilesystemList, capability.FilesystemSearch, capability.FilesystemRead, capability.FilesystemEdit, capability.FilesystemWrite)
 	}
 	if matchesAny(text, commandKeywords) {
-		add("Bash")
+		add(capability.SystemShell)
+	}
+	openTargetIntent := matchesAny(text, openApplicationKeywords) || matchesAny(text, openAppActionKeywords)
+	if matchesAny(text, localFileSearchKeywords) ||
+		(matchesAny(text, localFileActionKeywords) && matchesAny(text, localFilePlaceKeywords) && matchesAny(text, localFileObjectKeywords)) ||
+		openTargetIntent ||
+		(matchesAny(text, openAppActionKeywords) && matchesAny(text, openAppObjectKeywords)) {
+		add(capability.DesktopAction)
+	}
+	// The model decides whether an arbitrary target is a website or an installed app.
+	if openTargetIntent {
+		add(capability.BrowserOpen, capability.BrowserNavigate, capability.BrowserRead, capability.BrowserObserve, capability.BrowserAction, capability.BrowserWait, capability.BrowserScreenshot)
 	}
 	if needsWebAccess(text) {
-		add("WebSearch", "WebFetch")
+		add(capability.InternetSearch, capability.InternetFetch, capability.BrowserSearch, capability.BrowserNavigate, capability.BrowserRead, capability.BrowserObserve, capability.BrowserAction, capability.BrowserWait, capability.BrowserScreenshot)
 	}
 	if matchesAny(text, browserAuthenticationKeywords) {
-		add(tools.BrowserLoginToolName, tools.BrowserReadToolName, tools.BrowserCloseToolName)
+		add(capability.BrowserSearch, capability.BrowserNavigate, capability.BrowserLogin, capability.BrowserRead, capability.BrowserObserve, capability.BrowserAction, capability.BrowserWait, capability.BrowserScreenshot, capability.BrowserClose)
+	}
+	if matchesAny(text, browserDownloadKeywords) {
+		add(capability.BrowserOpen, capability.BrowserObserve, capability.BrowserAction, capability.BrowserDownload)
+	}
+	if matchesAny(text, browserScreenshotKeywords) {
+		add(capability.BrowserObserve, capability.BrowserAction, capability.BrowserScreenshot)
+	}
+	if matchesAny(text, browserCloseKeywords) {
+		add(capability.BrowserClose)
 	}
 	if matchesAny(text, planKeywords) || matchesAny(text, researchPlanningKeywords) {
-		add("TodoWrite", "EnterPlanMode", "ExitPlanMode")
+		add(capability.PlanningTodo, capability.PlanningEnter, capability.PlanningExit)
 	}
 	if matchesAny(text, taskKeywords) {
-		add("TaskCreate", "TaskGet", "TaskList", "TaskUpdate")
+		add(capability.TaskCreate, capability.TaskGet, capability.TaskList, capability.TaskUpdate)
 	}
 	if matchesAny(text, waitKeywords) {
-		add("Sleep")
+		add(capability.SystemWait)
+	}
+	if matchesAny(text, scheduledTaskKeywords) {
+		add(capability.AutomationSchedule)
 	}
 	return selected
 }

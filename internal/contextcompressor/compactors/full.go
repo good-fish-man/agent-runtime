@@ -175,7 +175,8 @@ func (c *FullCompacter) Compact(ctx context.Context, messages []Message, opts ..
 	if len(messages) > 2 {
 		keptMessages = messages[len(messages)-2:]
 	}
-	postTokens := c.tokenizer.EstimateMessages(keptMessages)
+	postTokens := c.tokenizer.EstimateMessages(keptMessages) +
+		c.tokenizer.EstimateMessages([]Message{*summaryMsg, boundary.Message})
 
 	return &CompactionResult{
 		BoundaryMarker:    boundary,

@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -111,7 +110,7 @@ func ApplyLocalModelRuntimeMode(provider, model, mode string) error {
 	mode = strings.ToLower(strings.TrimSpace(mode))
 	switch provider {
 	case constant.ProviderDiffusers:
-		modelDir := filepath.Join(athenaDir(), "models", "diffusers", strings.ReplaceAll(model, "/", "--"))
+		modelDir := diffusersModelDir(model)
 		if mode != constant.RuntimeModeAlwaysOn {
 			sharedDiffusersWorkers.stopModel(modelDir)
 			return nil

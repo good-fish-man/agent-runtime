@@ -7,7 +7,7 @@ import (
 	"github.com/good-fish-man/agent-runtime/internal/contextcompressor"
 	"github.com/good-fish-man/agent-runtime/internal/contextcompressor/compactors"
 	"github.com/good-fish-man/agent-runtime/internal/eino"
-	"github.com/good-fish-man/agent-runtime/log"
+	log "github.com/good-fish-man/logx"
 
 	"github.com/cloudwego/eino/schema"
 )

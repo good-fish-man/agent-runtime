@@ -140,7 +140,7 @@ func BuildDefaultPrompt(req *types.RunRequest, enabledTools []string) string {
 	builder.AddStaticSection(SystemSection, GetSystemSection())
 	builder.AddStaticSection(DoingTasksSection, GetDoingTasksSection())
 	builder.AddStaticSection(ActionsSection, GetActionsSection())
-	builder.AddStaticSection(UsingYourToolsSection, GetUsingYourToolsSection(enabledTools))
+	builder.AddStaticSection(UsingCapabilitiesSection, GetUsingCapabilitiesSection(enabledTools))
 	builder.AddStaticSection(OutputEfficiencySection, GetOutputEfficiencySection())
 	builder.AddStaticSection(ToneAndStyleSection, GetToneAndStyleSection())
 
@@ -174,7 +174,7 @@ func BuildSimplePrompt(customPrompt string) string {
 	return builder.BuildWithCustomPrompt(customPrompt)
 }
 
-// BuildStaticPrompt builds only the static sections (Intro, System, DoingTasks, Actions, UsingYourTools, OutputEfficiency, ToneAndStyle)
+// BuildStaticPrompt builds only the static sections, including selected capability guidance.
 // These can be cached per agent + tools combination
 func BuildStaticPrompt(enabledTools []string) string {
 	builder := NewPromptBuilder()
@@ -183,7 +183,7 @@ func BuildStaticPrompt(enabledTools []string) string {
 	builder.AddStaticSection(SystemSection, GetSystemSection())
 	builder.AddStaticSection(DoingTasksSection, GetDoingTasksSection())
 	builder.AddStaticSection(ActionsSection, GetActionsSection())
-	builder.AddStaticSection(UsingYourToolsSection, GetUsingYourToolsSection(enabledTools))
+	builder.AddStaticSection(UsingCapabilitiesSection, GetUsingCapabilitiesSection(enabledTools))
 	builder.AddStaticSection(OutputEfficiencySection, GetOutputEfficiencySection())
 	builder.AddStaticSection(ToneAndStyleSection, GetToneAndStyleSection())
 

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/good-fish-man/agent-runtime/internal/config"
-	"github.com/good-fish-man/agent-runtime/log"
+	log "github.com/good-fish-man/logx"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"

@@ -59,6 +59,16 @@ func TestExecuteTextToolMarkupRejectsOtherTools(t *testing.T) {
 	}
 }
 
+func TestExecuteTextToolMarkupRejectsClientActions(t *testing.T) {
+	result, handled, err := executeTextToolMarkup(context.Background(), `<tools>{"name":"browser_open","arguments":{"target":"Acme Portal"}}</tools>`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !handled || !strings.Contains(result, "不受支持") {
+		t.Fatalf("result=%q handled=%v", result, handled)
+	}
+}
+
 func TestExecuteTextToolMarkupHandlesMalformedMarkup(t *testing.T) {
 	result, handled, err := executeTextToolMarkup(context.Background(), `<tools>{"name":"GenerateImage"}`, nil)
 	if err != nil {

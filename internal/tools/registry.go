@@ -42,6 +42,21 @@ func (r *Registry) Register(meta ToolMeta) {
 	r.tools[meta.Name] = meta
 }
 
+// RegisterAlias copies execution metadata to an adapter name. Capability
+// adapters use model-safe names while retaining the underlying tool's
+// read-only, risk, and result-limit behavior.
+func (r *Registry) RegisterAlias(alias, target string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	meta, ok := r.tools[target]
+	if !ok {
+		return false
+	}
+	meta.Name = alias
+	r.tools[alias] = meta
+	return true
+}
+
 // Get 获取工具元信息
 func (r *Registry) Get(name string) (ToolMeta, bool) {
 	r.mu.RLock()

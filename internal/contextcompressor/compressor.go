@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/good-fish-man/agent-runtime/internal/contextcompressor/compactors"
-	"github.com/good-fish-man/agent-runtime/log"
+	log "github.com/good-fish-man/logx"
 )
 
 // Compactor 压缩器（支持多种压缩策略）

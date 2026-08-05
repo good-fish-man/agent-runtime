@@ -19,6 +19,7 @@ service AgentRuntime {
   rpc Resume(ResumeRequest) returns (ResumeResponse);
   rpc Stop(StopRequest) returns (StopResponse);
   rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+  rpc ListCapabilities(ListCapabilitiesRequest) returns (ListCapabilitiesResponse);
 }
 
 // ============================================================
@@ -78,7 +79,7 @@ message RunRequest {
   repeated MCPConfig mcps = 7;
   repeated CLIConfig clis = 8;
   repeated A2AAgentConfig a2a = 9;
-  repeated ToolConfig tools = 10;
+  repeated CapabilityConfig capabilities = 10;
   repeated InternalAgentConfig internal_agents = 11;
   repeated SubAgentConfig sub_agents = 12;
   RunOptions options = 13;
@@ -109,6 +110,7 @@ message AgentRequest {
   bool stream = 4;
   string request_id = 5;
   string trace_id = 6;
+  repeated CapabilityConfig capabilities = 7;
 }
 
 message AgentResponse {
@@ -322,14 +324,32 @@ message CLIConfig {
   string auth_type = 6;
 }
 
-message ToolConfig {
-  string type = 1;
-  string name = 2;
-  string description = 3;
-  string endpoint = 4;
-  string method = 5;
-  map<string, string> headers = 6;
-  RiskLevel risk_level = 7;
+// CapabilityConfig selects a stable provider-independent ability. Concrete
+// providers are Runtime implementation details and are not part of this contract.
+message CapabilityConfig {
+  string id = 1;
+  google.protobuf.Struct config = 2;
+}
+
+message ListCapabilitiesRequest {
+  string trace_id = 1;
+}
+
+message CapabilityDefinition {
+  string id = 1;
+  string description = 2;
+  map<string, string> input = 3;
+  string output = 4;
+  bool read_only = 5;
+  string risk = 6;
+  string status = 7;
+  string provider = 8;
+  string reason = 9;
+}
+
+message ListCapabilitiesResponse {
+  repeated CapabilityDefinition capabilities = 1;
+  string trace_id = 2;
 }
 
 message A2AAgentConfig {
@@ -352,7 +372,7 @@ message SubAgentConfig {
   string description = 3;
   string prompt = 4;
   ModelConfig model = 5;
-  repeated ToolConfig tools = 6;
+  repeated CapabilityConfig capabilities = 6;
   repeated Skill skills = 7;
   google.protobuf.Struct extra = 8;
   int32 max_iterations = 9;

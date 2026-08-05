@@ -43,11 +43,14 @@ const (
 
 // Environment variable names for server configuration.
 const (
-	EnvGRPCAddr       = "GRPC_ADDR"
-	EnvHTTPAddr       = "HTTP_ADDR"
-	EnvDefaultModel   = "DEFAULT_MODEL"
-	EnvDefaultAPIKey  = "DEFAULT_API_KEY"
-	EnvDefaultAPIBase = "DEFAULT_API_BASE"
+	EnvGRPCAddr                 = "GRPC_ADDR"
+	EnvHTTPAddr                 = "HTTP_ADDR"
+	EnvDefaultModel             = "DEFAULT_MODEL"
+	EnvDefaultAPIKey            = "DEFAULT_API_KEY"
+	EnvDefaultAPIBase           = "DEFAULT_API_BASE"
+	EnvRuntimePublicURL         = "AGENT_RUNTIME_PUBLIC_URL"
+	EnvRuntimeClientInternalURL = "ATHENA_RUNTIME_CLIENT_INTERNAL_URL"
+	EnvInternalServiceToken     = "ATHENA_INTERNAL_SERVICE_TOKEN"
 	// EnvConfigPath points to the YAML config file (db + memory sections).
 	EnvConfigPath = "AGENT_RUNTIME_CONFIG"
 )
@@ -70,13 +73,16 @@ const (
 
 // HTTP gateway routes and headers.
 const (
-	RouteHealth         = "/healthz"
-	RouteRun            = "/run"
-	RouteAgent          = "/agent"
-	HeaderTraceID       = "X-Trace-Id"
-	HeaderRequestID     = "X-Request-Id"
-	HeaderCorrelationID = "X-Correlation-Id"
-	HeaderTraceparent   = "Traceparent"
+	RouteHealth               = "/healthz"
+	RouteRun                  = "/run"
+	RouteAgent                = "/agent"
+	RouteGenerated            = "/generated"
+	RouteCapabilities         = "/capabilities"
+	HeaderTraceID             = "X-Trace-Id"
+	HeaderRequestID           = "X-Request-Id"
+	HeaderCorrelationID       = "X-Correlation-Id"
+	HeaderTraceparent         = "Traceparent"
+	HeaderAthenaInternalToken = "X-Athena-Internal-Token"
 )
 
 // Agent identity used when constructing the ADK ChatModelAgent.
@@ -103,16 +109,25 @@ const (
 
 // Base directory layout used for skills, reports and other runtime data.
 const (
-	DefaultBaseDirName  = ".agent-runtime"
-	DirSkills           = "skills"
-	DirDataReports      = "data/reports"
-	SkillsConfigRelPath = "config/skills-config.yaml"
-	FallbackReportsDir  = "/tmp/reports"
-	FallbackReportsURL  = "/reports"
-	SkillMDFileName     = "SKILL.md"
-	SkillScriptsDir     = "scripts"
-	AutoDataFileName    = ".auto_data.json"
-	SkillScopeBoth      = "both"
+	DefaultBaseDirName        = ".agent-runtime"
+	DefaultAthenaHomeDirName  = ".athena"
+	DefaultAthenaTempDirName  = "athena"
+	DirSkills                 = "skills"
+	DirDataReports            = "data/reports"
+	DirModels                 = "models"
+	DirDiffusers              = "diffusers"
+	DirImageRuntime           = "image-runtime"
+	DirVenv                   = "venv"
+	DirGeneratedImages        = "generated-images"
+	SkillsConfigRelPath       = "config/skills-config.yaml"
+	FallbackReportsDir        = "/tmp/reports"
+	FallbackReportsURL        = "/reports"
+	SkillMDFileName           = "SKILL.md"
+	SkillScriptsDir           = "scripts"
+	AutoDataFileName          = ".auto_data.json"
+	DiffusersCompleteFileName = ".athena_complete"
+	OllamaStartupLogFileName  = "athena-ollama.log"
+	SkillScopeBoth            = "both"
 )
 
 // Sandbox execution defaults.
@@ -144,9 +159,11 @@ const (
 
 // External service endpoints.
 const (
-	DefaultOpenAIAPIBase    = "https://api.openai.com/v1"
-	DefaultOllamaAPIBase    = "http://127.0.0.1:11434"
-	DuckDuckGoHTMLSearchURL = "https://html.duckduckgo.com/html/?q=%s"
+	DefaultOpenAIAPIBase                         = "https://api.openai.com/v1"
+	DefaultOllamaAPIBase                         = "http://127.0.0.1:11434"
+	DefaultRuntimePublicURL                      = "http://127.0.0.1:18081"
+	DefaultRuntimeClientInternalScheduledTaskURL = "http://127.0.0.1:8090/api/agent-runtime-client/v1/internal/scheduled-task"
+	DuckDuckGoHTMLSearchURL                      = "https://html.duckduckgo.com/html/?q=%s"
 )
 
 // Local model providers and lifecycle modes.

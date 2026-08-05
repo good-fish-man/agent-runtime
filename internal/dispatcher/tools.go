@@ -3,27 +3,69 @@ package dispatcher
 import (
 	"context"
 
+	"github.com/good-fish-man/agent-runtime/internal/capability"
 	"github.com/good-fish-man/agent-runtime/internal/plugins"
 	"github.com/good-fish-man/agent-runtime/internal/retriever"
 	"github.com/good-fish-man/agent-runtime/internal/subagent"
 	"github.com/good-fish-man/agent-runtime/internal/tools"
 	"github.com/good-fish-man/agent-runtime/internal/types"
-	"github.com/good-fish-man/agent-runtime/log"
+	log "github.com/good-fish-man/logx"
 
 	"github.com/cloudwego/eino/components/tool"
 )
 
-// buildTools assembles the extra (non built-in) tools for this run and returns
-// them along with the full set of enabled tool names (built-in + extra) used to
-// render the prompt's "using your tools" section.
+// buildTools resolves selected capabilities into their internal providers.
 func (d *Dispatcher) buildTools(ctx context.Context, relevanceText string) ([]tool.BaseTool, []string) {
-	builtinNames := selectBuiltinTools(relevanceText, len(d.req.Files) > 0)
-	extra := tools.ToolsByNamesWithBasePath(d.workDir, builtinNames)
+	capabilityIDs := selectBuiltinCapabilities(relevanceText, len(d.req.Files) > 0)
+	if d.contextString("active_desktop_session") != "" && !containsToolName(capabilityIDs, capability.DesktopAction) {
+		capabilityIDs = append(capabilityIDs, capability.DesktopAction)
+	}
+	if d.contextString("active_browser_session") != "" {
+		for _, id := range []string{capability.BrowserNavigate, capability.BrowserRead, capability.BrowserObserve, capability.BrowserAction} {
+			if !containsToolName(capabilityIDs, id) {
+				capabilityIDs = append(capabilityIDs, id)
+			}
+		}
+	}
+	for _, configured := range d.req.Capabilities {
+		if configured.ID != "" && !containsToolName(capabilityIDs, configured.ID) {
+			capabilityIDs = append(capabilityIDs, configured.ID)
+		}
+	}
+	if d.isBackgroundMonitor() {
+		capabilityIDs = readOnlyMonitorCapabilities(capabilityIDs)
+	}
+	if !d.contextBool("desktop_bridge") {
+		capabilityIDs = withoutToolNames(capabilityIDs, capability.DesktopAction)
+	}
+	if !d.contextBool("browser_controller") {
+		capabilityIDs = withoutToolNames(capabilityIDs,
+			capability.BrowserSearch, capability.BrowserOpen, capability.BrowserLogin, capability.BrowserRead,
+			capability.BrowserNavigate, capability.BrowserObserve, capability.BrowserAction, capability.BrowserClose,
+		)
+	}
+	staticCapabilityIDs := withoutToolNames(capabilityIDs, capability.AutomationSchedule, capability.ImageGenerate, capability.VideoGenerate)
+	extra, unavailable, err := capability.GlobalRegistry.Resolve(d.workDir, staticCapabilityIDs)
+	if err != nil {
+		log.WarnwCtx(ctx, "capability resolution failed", "error", err)
+	}
+	if len(unavailable) > 0 {
+		log.WarnwCtx(ctx, "capabilities unavailable", "capabilities", unavailable)
+	}
+	if containsToolName(capabilityIDs, capability.AutomationSchedule) && !d.isBackgroundMonitor() {
+		extra = append(extra, d.wrapDynamicCapability(capability.AutomationSchedule,
+			tools.NewScheduledTaskCreateTool(d.contextString("user_id"), d.contextString("agent_id"), d.contextString("session_id"), d.contextString("timezone"))))
+	}
+	if d.isBackgroundMonitor() {
+		return extra, availableCapabilityIDs(capabilityIDs)
+	}
 	if imageModel, ok := d.req.Models["image"]; ok && imageModel.Name != "" {
-		extra = append(extra, tools.NewImageGenerationTool(imageModel))
+		extra = append(extra, d.wrapDynamicCapability(capability.ImageGenerate, tools.NewImageGenerationTool(imageModel)))
+		capabilityIDs = append(capabilityIDs, capability.ImageGenerate)
 	}
 	if videoModel, ok := d.req.Models["video"]; ok && videoModel.Name != "" {
-		extra = append(extra, tools.NewVideoGenerationTool(videoModel))
+		extra = append(extra, d.wrapDynamicCapability(capability.VideoGenerate, tools.NewVideoGenerationTool(videoModel)))
+		capabilityIDs = append(capabilityIDs, capability.VideoGenerate)
 	}
 
 	// Sub-agent orchestration tools (spawn / delegate / parallel / manage).
@@ -52,13 +94,123 @@ func (d *Dispatcher) buildTools(ctx context.Context, relevanceText string) ([]to
 	// Skill tools (skill execution, load_skill, orchestrate_skills, create_skill).
 	extra = append(extra, d.buildSkillTools(ctx)...)
 
-	names := append([]string{}, builtinNames...)
+	names := availableCapabilityIDs(capabilityIDs)
 	for _, t := range extra {
 		if info, err := t.Info(ctx); err == nil && info != nil {
-			names = append(names, info.Name)
+			name := info.Name
+			if definition, ok := capability.GlobalRegistry.FindByModelName(info.Name); ok {
+				name = definition.ID
+			}
+			if !containsToolName(names, name) {
+				names = append(names, name)
+			}
 		}
 	}
 	return extra, names
+}
+
+func (d *Dispatcher) contextString(key string) string {
+	if d.req.Context == nil {
+		return ""
+	}
+	value, _ := d.req.Context[key].(string)
+	return value
+}
+
+func (d *Dispatcher) contextBool(key string) bool {
+	if d.req.Context == nil {
+		return false
+	}
+	value, _ := d.req.Context[key].(bool)
+	return value
+}
+
+func withoutToolNames(names []string, removed ...string) []string {
+	remove := make(map[string]bool, len(removed))
+	for _, name := range removed {
+		remove[name] = true
+	}
+	result := make([]string, 0, len(names))
+	for _, name := range names {
+		if !remove[name] {
+			result = append(result, name)
+		}
+	}
+	return result
+}
+
+func withoutBaseTools(ctx context.Context, values []tool.BaseTool, removed ...string) []tool.BaseTool {
+	remove := make(map[string]bool, len(removed))
+	for _, name := range removed {
+		remove[name] = true
+	}
+	result := make([]tool.BaseTool, 0, len(values))
+	for _, value := range values {
+		info, err := value.Info(ctx)
+		if err == nil && info != nil && remove[info.Name] {
+			continue
+		}
+		result = append(result, value)
+	}
+	return result
+}
+
+func availableCapabilityIDs(ids []string) []string {
+	result := make([]string, 0, len(ids))
+	for _, id := range ids {
+		definition, ok := capability.GlobalRegistry.Get(id)
+		if ok && definition.Status == capability.StatusAvailable {
+			result = append(result, id)
+		}
+	}
+	return result
+}
+
+func (d *Dispatcher) wrapDynamicCapability(id string, provider tool.BaseTool) tool.BaseTool {
+	definition, ok := capability.GlobalRegistry.Get(id)
+	if !ok {
+		return provider
+	}
+	return capability.Wrap(definition, provider)
+}
+
+func (d *Dispatcher) isBackgroundMonitor() bool {
+	if d.req.Context == nil {
+		return false
+	}
+	value, _ := d.req.Context["background_monitor"].(bool)
+	return value
+}
+func containsToolName(names []string, wanted string) bool {
+	for _, name := range names {
+		if name == wanted {
+			return true
+		}
+	}
+	return false
+}
+func readOnlyMonitorCapabilities(names []string) []string {
+	allowed := map[string]bool{
+		capability.InternetSearch: true,
+		capability.InternetFetch:  true,
+		capability.BrowserSearch:  true,
+		capability.BrowserRead:    true,
+		capability.BrowserObserve: true,
+		capability.BrowserClose:   true,
+	}
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if allowed[name] {
+			out = append(out, name)
+		}
+	}
+	if !containsToolName(out, capability.InternetSearch) {
+		out = append(out, capability.InternetSearch)
+	}
+	if !containsToolName(out, capability.InternetFetch) {
+		out = append(out, capability.InternetFetch)
+	}
+	return out
 }
 
 // mapSubAgents converts the trimmed types.SubAgentConfig into the subagent
@@ -70,7 +222,10 @@ func (d *Dispatcher) mapSubAgents(ctx context.Context, in []types.SubAgentConfig
 		if id == "" {
 			id = c.Name
 		}
-		runtimeTools := tools.ToolsByNamesWithBasePath(d.workDir, c.Tools)
+		runtimeTools, unavailable, _ := capability.GlobalRegistry.Resolve(d.workDir, c.Capabilities)
+		if len(unavailable) > 0 {
+			log.WarnwCtx(ctx, "sub-agent capabilities unavailable", "sub_agent", id, "capabilities", unavailable)
+		}
 		runtimeTools = append(runtimeTools, d.buildSubAgentSkillTools(ctx, c.Skills)...)
 		var modelConfig *subagent.ModelConfig
 		if c.Model != nil {
@@ -85,7 +240,7 @@ func (d *Dispatcher) mapSubAgents(ctx context.Context, in []types.SubAgentConfig
 			Description:   c.Description,
 			Prompt:        c.Prompt,
 			Model:         modelConfig,
-			Tools:         c.Tools,
+			Capabilities:  append([]string{}, c.Capabilities...),
 			Skills:        subAgentSkillNames(c.Skills),
 			RuntimeTools:  runtimeTools,
 			MaxIterations: c.MaxIterations,

@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/good-fish-man/agent-runtime/internal/constant"
-	"github.com/good-fish-man/agent-runtime/log"
+	log "github.com/good-fish-man/logx"
 )
 
 const ollamaStartupTimeout = 20 * time.Second
@@ -81,7 +81,7 @@ func ensureOllamaRunning(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	logPath := filepath.Join(os.TempDir(), "athena-ollama.log")
+	logPath := filepath.Join(os.TempDir(), constant.OllamaStartupLogFileName)
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open Ollama log: %w", err)

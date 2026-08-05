@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/cloudwego/eino/components/tool"
-	"github.com/good-fish-man/agent-runtime/log"
+	log "github.com/good-fish-man/logx"
 )
 
 // CsvDataAnalysisReportPlaceholders csv-data-analysis 报告模板的占位符

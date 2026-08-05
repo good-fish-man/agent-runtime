@@ -1,0 +1,309 @@
+package research
+
+import (
+	"fmt"
+	"regexp"
+	"strings"
+	"time"
+	"unicode"
+
+	"github.com/good-fish-man/agent-runtime/internal/language"
+)
+
+// Kind identifies a deterministic research workflow.
+type Kind string
+
+const (
+	KindNone       Kind = ""
+	KindNews       Kind = "news"
+	KindTravel     Kind = "travel"
+	KindComparison Kind = "comparison"
+	KindResearch   Kind = "research"
+)
+
+// Plan is the code-owned contract for one research pass.
+type Plan struct {
+	Kind             Kind
+	Queries          []string
+	SeedURLs         []string
+	MinSources       int
+	MaxSources       int
+	Date             string
+	ResolvedRequest  string
+	ResponseLanguage string
+}
+
+var urlPattern = regexp.MustCompile(`https?://[^\s<>"']+`)
+
+var structuredAnswerLabelPattern = regexp.MustCompile(`(?i)(fetch\s+now\?|count|sources?|立即获取|现在获取|数量|来源)\s*[：:]`)
+
+var (
+	newsKeywords       = []string{"新闻", "资讯", "头条", "要闻", "news", "headlines", "current events"}
+	travelKeywords     = []string{"旅行", "旅游", "行程", "出行", "度假", "自驾", "机票", "酒店", "住宿", "攻略", "travel", "trip", "itinerary", "vacation", "flight", "hotel"}
+	comparisonKeywords = []string{"推荐", "对比", "比较", "选型", "哪个好", "值得买吗", "购买建议", "recommend", "compare", "comparison", "best", "buying guide"}
+	researchKeywords   = []string{"调研", "研究", "查证", "核实", "搜索", "上网", "联网", "查询一下", "查一下", "来源", "引用", "research", "investigate", "verify", "search online", "look up", "browse", "sources", "citations"}
+	weatherKeywords    = []string{"天气", "气温", "weather", "forecast", "temperature"}
+)
+
+// Analyze recognizes research-heavy work and creates bounded search queries.
+// Weather is intentionally handled by its location-aware path instead of a
+// generic web query, which prevents searches such as "today weather".
+func Analyze(prompt string, requestContext map[string]any, now time.Time) Plan {
+	text := strings.TrimSpace(prompt)
+	if text == "" {
+		return Plan{}
+	}
+	localNow := userTime(now, requestContext)
+	date := localNow.Format("2006-01-02")
+	locale, _ := requestContext["locale"].(string)
+	responseLanguage := language.Resolve(locale, text).Name
+	urls := cleanURLs(urlPattern.FindAllString(text, -1))
+
+	if containsAny(text, weatherKeywords) {
+		return Plan{}
+	}
+	if containsAny(text, newsKeywords) {
+		return newsPlan(date, locale, text, "", urls)
+	}
+	if containsAny(text, travelKeywords) {
+		queries := uniqueQueries(text+" "+date, text+" 官方 交通 天气", text+" 价格 开放时间")
+		if prefersEnglish(locale, text) {
+			queries = uniqueQueries(text+" "+date, text+" official transport weather", text+" prices opening hours")
+		}
+		return Plan{
+			Kind:             KindTravel,
+			Queries:          queries,
+			SeedURLs:         urls,
+			MinSources:       3,
+			MaxSources:       5,
+			Date:             date,
+			ResolvedRequest:  text,
+			ResponseLanguage: responseLanguage,
+		}
+	}
+	if containsAny(text, comparisonKeywords) {
+		queries := uniqueQueries(text+" "+date, text+" 官方规格", text+" 独立评测")
+		if prefersEnglish(locale, text) {
+			queries = uniqueQueries(text+" "+date, text+" official specifications", text+" independent reviews")
+		}
+		return Plan{
+			Kind:             KindComparison,
+			Queries:          queries,
+			SeedURLs:         urls,
+			MinSources:       3,
+			MaxSources:       5,
+			Date:             date,
+			ResolvedRequest:  text,
+			ResponseLanguage: responseLanguage,
+		}
+	}
+	if len(urls) > 0 || containsAny(text, researchKeywords) {
+		queries := uniqueQueries(text, text+" 官方来源")
+		if prefersEnglish(locale, text) {
+			queries = uniqueQueries(text, text+" official sources")
+		}
+		return Plan{
+			Kind:             KindResearch,
+			Queries:          queries,
+			SeedURLs:         urls,
+			MinSources:       2,
+			MaxSources:       4,
+			Date:             date,
+			ResolvedRequest:  text,
+			ResponseLanguage: responseLanguage,
+		}
+	}
+	return Plan{}
+}
+
+// AnalyzeConversation carries short user refinements such as "Tokyo" or
+// "自驾" into the latest research task instead of treating them as new tasks.
+func AnalyzeConversation(prompt string, previousUserPrompts []string, requestContext map[string]any, now time.Time) Plan {
+	if refinement, ok := structuredAnswerRefinement(prompt); ok {
+		return refinePreviousPlan(refinement, previousUserPrompts, requestContext, now, true)
+	}
+	currentPlan := Analyze(prompt, requestContext, now)
+	if currentPlan.Kind != KindNone {
+		if currentPlan.Kind == KindNews {
+			if scope := priorNewsScope(previousUserPrompts, requestContext, now); scope != "" {
+				locale, _ := requestContext["locale"].(string)
+				resolved := currentPlan.ResolvedRequest + "\nConversation scope: " + scope
+				return newsPlan(currentPlan.Date, locale, resolved, scope, currentPlan.SeedURLs)
+			}
+		}
+		return currentPlan
+	}
+	refinement := strings.TrimSpace(prompt)
+	if refinement == "" || len([]rune(refinement)) > 80 {
+		return Plan{}
+	}
+	return refinePreviousPlan(refinement, previousUserPrompts, requestContext, now, false)
+}
+
+func refinePreviousPlan(refinement string, previousUserPrompts []string, requestContext map[string]any, now time.Time, preserveSubject bool) Plan {
+	for i := len(previousUserPrompts) - 1; i >= 0; i-- {
+		previous := strings.TrimSpace(previousUserPrompts[i])
+		if previous == "" || previous == refinement {
+			continue
+		}
+		plan := Analyze(previous, requestContext, now)
+		if plan.Kind == KindNone {
+			continue
+		}
+		locale, _ := requestContext["locale"].(string)
+		resolved := previous + "\nUser refinement: " + refinement
+		if preserveSubject {
+			plan.ResolvedRequest = resolved
+			plan.Queries = uniqueQueries(previous+" "+plan.Date, previous+" official sources")
+			if !prefersEnglish(locale, previous) {
+				plan.Queries = uniqueQueries(previous+" "+plan.Date, previous+" 官方来源")
+			}
+			return plan
+		}
+		if plan.Kind == KindNews {
+			return newsPlan(plan.Date, locale, resolved, refinement, plan.SeedURLs)
+		}
+		return Analyze(resolved, requestContext, now)
+	}
+	return Plan{}
+}
+
+// structuredAnswerRefinement recognizes the compact text produced by
+// clarification cards. Field labels describe the UI, not the search subject,
+// so only their selected values should refine the preceding research task.
+func structuredAnswerRefinement(value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	matches := structuredAnswerLabelPattern.FindAllStringIndex(value, -1)
+	if len(matches) < 2 {
+		return "", false
+	}
+	selections := make([]string, 0, len(matches))
+	for i, match := range matches {
+		end := len(value)
+		if i+1 < len(matches) {
+			end = matches[i+1][0]
+		}
+		selection := strings.TrimSpace(value[match[1]:end])
+		selection = strings.Trim(selection, ";,，。 \t\n")
+		if selection != "" {
+			selections = append(selections, selection)
+		}
+	}
+	if len(selections) == 0 {
+		return "", true
+	}
+	return strings.Join(selections, "; "), true
+}
+
+func priorNewsScope(previousUserPrompts []string, requestContext map[string]any, now time.Time) string {
+	for i := len(previousUserPrompts) - 1; i >= 1; i-- {
+		candidate := strings.TrimSpace(previousUserPrompts[i])
+		if candidate == "" || len([]rune(candidate)) > 40 || Analyze(candidate, requestContext, now).Kind != KindNone || isAcknowledgement(candidate) {
+			continue
+		}
+		for j := i - 1; j >= 0; j-- {
+			if Analyze(previousUserPrompts[j], requestContext, now).Kind == KindNews {
+				return candidate
+			}
+		}
+	}
+	return ""
+}
+
+func isAcknowledgement(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	for _, acknowledgement := range []string{"好", "好的", "可以", "谢谢", "继续", "ok", "okay", "thanks", "continue"} {
+		if value == acknowledgement {
+			return true
+		}
+	}
+	return false
+}
+
+func newsPlan(date, locale, prompt, scope string, urls []string) Plan {
+	queries := []string{
+		fmt.Sprintf("%s 今日要闻", date),
+		fmt.Sprintf("%s 国际新闻", date),
+		fmt.Sprintf("%s 科技 财经 新闻", date),
+	}
+	if prefersEnglish(locale, prompt) {
+		queries = []string{
+			fmt.Sprintf("top news %s", date),
+			fmt.Sprintf("world news %s", date),
+			fmt.Sprintf("technology business news %s", date),
+		}
+	}
+	if scope != "" {
+		queries = []string{
+			fmt.Sprintf("%s %s 今日新闻", date, scope),
+			fmt.Sprintf("%s %s 社会 经济 新闻", date, scope),
+			fmt.Sprintf("%s %s 科技 商业 新闻", date, scope),
+		}
+		if prefersEnglish(locale, prompt) {
+			queries = []string{
+				fmt.Sprintf("%s news %s", scope, date),
+				fmt.Sprintf("%s society economy news %s", scope, date),
+				fmt.Sprintf("%s technology business news %s", scope, date),
+			}
+		}
+	}
+	return Plan{
+		Kind: KindNews, Queries: queries, SeedURLs: urls, MinSources: 4, MaxSources: 6, Date: date,
+		ResolvedRequest: prompt, ResponseLanguage: language.Resolve(locale, prompt).Name,
+	}
+}
+
+func prefersEnglish(locale, text string) bool {
+	for _, r := range text {
+		if unicode.Is(unicode.Han, r) {
+			return false
+		}
+	}
+	return strings.HasPrefix(strings.ToLower(locale), "en") || locale == ""
+}
+
+func userTime(now time.Time, requestContext map[string]any) time.Time {
+	if timezone, _ := requestContext["timezone"].(string); timezone != "" {
+		if location, err := time.LoadLocation(timezone); err == nil {
+			return now.In(location)
+		}
+	}
+	return now
+}
+
+func containsAny(text string, keywords []string) bool {
+	lower := strings.ToLower(text)
+	for _, keyword := range keywords {
+		if strings.Contains(lower, strings.ToLower(keyword)) {
+			return true
+		}
+	}
+	return false
+}
+
+func uniqueQueries(values ...string) []string {
+	seen := make(map[string]bool)
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.Join(strings.Fields(value), " ")
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
+}
+
+func cleanURLs(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]bool)
+	for _, value := range values {
+		value = strings.TrimRight(value, ".,;:!?，。；：！？)")
+		if value != "" && !seen[value] {
+			seen[value] = true
+			result = append(result, value)
+		}
+	}
+	return result
+}

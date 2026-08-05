@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -15,6 +16,7 @@ import (
 
 	runtimev1 "github.com/good-fish-man/agent-runtime/gen/agent/runtime/v1"
 	"github.com/good-fish-man/agent-runtime/internal/admin"
+	"github.com/good-fish-man/agent-runtime/internal/capability"
 	"github.com/good-fish-man/agent-runtime/internal/config"
 	"github.com/good-fish-man/agent-runtime/internal/constant"
 	"github.com/good-fish-man/agent-runtime/internal/database"
@@ -23,7 +25,7 @@ import (
 	"github.com/good-fish-man/agent-runtime/internal/memory"
 	"github.com/good-fish-man/agent-runtime/internal/server"
 	"github.com/good-fish-man/agent-runtime/internal/tools"
-	"github.com/good-fish-man/agent-runtime/log"
+	log "github.com/good-fish-man/logx"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -118,6 +120,7 @@ func serve(configPath string, quit <-chan os.Signal) (bool, error) {
 	mux.HandleFunc(constant.RouteHealth, makeHealthHandler(srv))
 	mux.HandleFunc(constant.RouteRun, makeRunHandler(srv))
 	mux.HandleFunc(constant.RouteAgent, makeAgentHandler(srv))
+	mux.HandleFunc(constant.RouteCapabilities, makeCapabilitiesHandler())
 	mux.HandleFunc("/generated/", tools.GeneratedImageHandler)
 	restartCh := make(chan struct{}, 1)
 	admin.NewHandler(configPath, cfg.Skills.ConfigPath, restartCh).Register(mux)
@@ -235,6 +238,19 @@ func makeHealthHandler(srv *server.Server) http.HandlerFunc {
 	}
 }
 
+func makeCapabilitiesHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{"capabilities": capability.GlobalRegistry.List()}); err != nil {
+			writeError(w, fmt.Errorf("encode capabilities: %w", err))
+		}
+	}
+}
+
 func makeRunHandler(srv *server.Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -312,7 +328,11 @@ func serveSSE(w http.ResponseWriter, r *http.Request, run func(send func(*runtim
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
+	emittedError := false
 	send := func(ev *runtimev1.StreamEvent) error {
+		if ev != nil && ev.GetError() != nil {
+			emittedError = true
+		}
 		b, err := jsonMarshal.Marshal(ev)
 		if err != nil {
 			return err
@@ -325,6 +345,9 @@ func serveSSE(w http.ResponseWriter, r *http.Request, run func(send func(*runtim
 	}
 	if err := run(send); err != nil {
 		log.ErrorwCtx(r.Context(), "http stream failed", "method", r.Method, "path", r.URL.EscapedPath(), "error_chain", log.FormatError(err))
+		if emittedError {
+			return
+		}
 		traceID, _ := r.Context().Value(log.ReqIDKey).(string)
 		_, _ = fmt.Fprintf(w, "event: %s\ndata: {\"message\":%q,\"trace_id\":%q}\n\n", constant.EventError, err.Error(), traceID)
 		flusher.Flush()

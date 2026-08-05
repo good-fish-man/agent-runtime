@@ -23,7 +23,9 @@ type Extractor struct {
 
 // NewExtractor creates an Extractor from a model config.
 func NewExtractor(model eino.ModelConfig) *Extractor {
-	apiBase := eino.ExpandEnv(model.APIBase)
+	model.Name = strings.TrimSpace(model.Name)
+	model.APIKey = strings.TrimSpace(model.APIKey)
+	apiBase := strings.TrimSpace(model.APIBase)
 	if apiBase == "" {
 		apiBase = constant.DefaultOpenAIAPIBase
 	}
@@ -37,7 +39,7 @@ func NewExtractor(model eino.ModelConfig) *Extractor {
 
 // Extract returns memories mined from the given user/assistant exchange.
 func (e *Extractor) Extract(ctx context.Context, userInput, assistantOutput string) ([]ExtractedMemory, error) {
-	apiKey := eino.ExpandEnv(e.model.APIKey)
+	apiKey := strings.TrimSpace(e.model.APIKey)
 	if apiKey == "" || e.model.Name == "" {
 		return nil, nil
 	}
@@ -80,7 +82,6 @@ func (e *Extractor) callLLM(ctx context.Context, apiKey, prompt string) (string,
 	reqBody := map[string]any{
 		"model":           e.model.Name,
 		"messages":        []map[string]any{{"role": "user", "content": prompt}},
-		"temperature":     0.3,
 		"response_format": map[string]string{"type": "json_object"},
 	}
 	body, err := json.Marshal(reqBody)
