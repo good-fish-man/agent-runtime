@@ -25,11 +25,11 @@ func TestResearchRunRemovesModelWebTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := &Dispatcher{
-		capabilityIDs: []string{capability.InternetSearch, capability.InternetFetch, capability.FilesystemRead},
+		capabilityIDs: []string{capability.InternetSearch, capability.InternetFetch, capability.BrowserTask, capability.BrowserNavigate, capability.FilesystemRead},
 		extraTools:    providers,
 	}
 	d.disableModelResearchTools(context.Background())
-	if containsToolName(d.capabilityIDs, capability.InternetSearch) || containsToolName(d.capabilityIDs, capability.InternetFetch) {
+	if containsToolName(d.capabilityIDs, capability.InternetSearch) || containsToolName(d.capabilityIDs, capability.InternetFetch) || containsToolName(d.capabilityIDs, capability.BrowserTask) || containsToolName(d.capabilityIDs, capability.BrowserNavigate) {
 		t.Fatalf("research capabilities remain selected: %v", d.capabilityIDs)
 	}
 	if len(d.extraTools) != 1 {

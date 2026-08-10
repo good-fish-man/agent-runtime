@@ -5,6 +5,7 @@ package eino
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/good-fish-man/agent-runtime/internal/actionprotocol"
 	"github.com/good-fish-man/agent-runtime/internal/capability"
@@ -43,6 +45,15 @@ type ModelConfig struct {
 type ChatMessage struct {
 	Role    string
 	Content string
+}
+
+type VisualInput struct {
+	ID       string
+	MIMEType string
+	Data     []byte
+	SHA256   string
+	Purpose  string
+	Detail   string
 }
 
 // Usage holds token accounting from a completion.
@@ -126,6 +137,9 @@ type RunParams struct {
 	ExtraTools []tool.BaseTool
 	// DisableBuiltinTools omits the built-in tool set, using only ExtraTools.
 	DisableBuiltinTools bool
+	// VisualInputs are trusted device observations attached to the current user
+	// turn through Eino's native multimodal message representation.
+	VisualInputs []VisualInput
 	// OnAction receives device-bound v2 actions. Actions are control events and
 	// are never rendered as assistant text.
 	OnAction func(actionprotocol.Action) error
@@ -136,6 +150,15 @@ type toolExecutionResult struct {
 	Content     string
 	ActionCount int
 	Usage       Usage
+}
+
+type toolInvocation struct {
+	name      string
+	callID    string
+	arguments string
+	tool      tool.InvokableTool
+	output    string
+	err       error
 }
 
 var envVarPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
@@ -153,17 +176,17 @@ func ExpandEnv(s string) string {
 
 // Client wraps an eino chat model and runs it through the ADK agent/runner.
 type Client struct {
-	model *openai.ChatModel
+	model model.ToolCallingChatModel
 	name  string
 }
 
 // NewClient builds a chat model from cfg. api_key/api_base support ${ENV_VAR}.
 func NewClient(ctx context.Context, cfg ModelConfig) (*Client, error) {
 	if cfg.Name == "" {
-		return nil, fmt.Errorf("model name is required")
+		return nil, log.NewError("eino.NewClient.validate", "model name is required")
 	}
 	if err := prepareLocalModelRuntime(ctx, &cfg); err != nil {
-		return nil, err
+		return nil, log.WrapError(err, "eino.NewClient.prepareLocalModelRuntime")
 	}
 	oc := &openai.ChatModelConfig{
 		APIKey:  ExpandEnv(cfg.APIKey),
@@ -184,9 +207,9 @@ func NewClient(ctx context.Context, cfg ModelConfig) (*Client, error) {
 	}
 	cm, err := openai.NewChatModel(ctx, oc)
 	if err != nil {
-		return nil, fmt.Errorf("create chat model %q: %w", cfg.Name, err)
+		return nil, log.WrapError(err, "eino.NewClient.createChatModel")
 	}
-	return &Client{model: cm, name: cfg.Name}, nil
+	return &Client{model: newObservedChatModel(cm, cfg.Provider, cfg.Name), name: cfg.Name}, nil
 }
 
 // Name returns the model name.
@@ -196,7 +219,7 @@ func (c *Client) Name() string { return c.name }
 // dispatcher's sub-agent manager and context compressor) that need direct model access.
 func (c *Client) Model() model.ToolCallingChatModel { return c.model }
 
-func toADKMessages(prompt string, msgs []ChatMessage) []adk.Message {
+func toADKMessages(prompt string, msgs []ChatMessage, visualInputs []VisualInput) []adk.Message {
 	out := make([]adk.Message, 0, len(msgs)+1)
 	for _, m := range msgs {
 		switch m.Role {
@@ -208,10 +231,45 @@ func toADKMessages(prompt string, msgs []ChatMessage) []adk.Message {
 			out = append(out, schema.UserMessage(m.Content))
 		}
 	}
-	if prompt != "" {
-		out = append(out, schema.UserMessage(prompt))
+	if prompt != "" || len(visualInputs) > 0 {
+		out = append(out, userMessageWithVisualInputs(prompt, visualInputs))
 	}
 	return out
+}
+
+func userMessageWithVisualInputs(prompt string, visualInputs []VisualInput) *schema.Message {
+	if len(visualInputs) == 0 {
+		return schema.UserMessage(prompt)
+	}
+	parts := make([]schema.MessageInputPart, 0, len(visualInputs)+1)
+	if prompt != "" {
+		parts = append(parts, schema.MessageInputPart{Type: schema.ChatMessagePartTypeText, Text: prompt})
+	}
+	for _, input := range visualInputs {
+		if len(input.Data) == 0 || !strings.HasPrefix(input.MIMEType, "image/") {
+			continue
+		}
+		encoded := base64.StdEncoding.EncodeToString(input.Data)
+		detail := schema.ImageURLDetailAuto
+		switch strings.ToLower(strings.TrimSpace(input.Detail)) {
+		case "low":
+			detail = schema.ImageURLDetailLow
+		case "high":
+			detail = schema.ImageURLDetailHigh
+		}
+		parts = append(parts, schema.MessageInputPart{
+			Type: schema.ChatMessagePartTypeImageURL,
+			Image: &schema.MessageInputImage{
+				MessagePartCommon: schema.MessagePartCommon{Base64Data: &encoded, MIMEType: input.MIMEType},
+				Detail:            detail,
+			},
+			Extra: map[string]any{"artifact_id": input.ID, "sha256": input.SHA256, "purpose": input.Purpose},
+		})
+	}
+	if len(parts) == 0 {
+		return schema.UserMessage(prompt)
+	}
+	return &schema.Message{Role: schema.User, UserInputMultiContent: parts}
 }
 
 func usageOf(m *schema.Message) Usage {
@@ -281,6 +339,7 @@ func (c *Client) buildRunner(ctx context.Context, p RunParams, streaming bool) (
 				capability.ModelName(capability.VideoGenerate):   true,
 				capability.ModelName(capability.InteractionAsk):  true,
 				capability.ModelName(capability.BrowserSearch):   true,
+				capability.ModelName(capability.BrowserTask):     true,
 				capability.ModelName(capability.BrowserOpen):     true,
 				capability.ModelName(capability.BrowserNavigate): true,
 				capability.ModelName(capability.BrowserLogin):    true,
@@ -293,7 +352,7 @@ func (c *Client) buildRunner(ctx context.Context, p RunParams, streaming bool) (
 		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("create agent: %w", err)
+		return nil, log.WrapError(err, "eino.Client.buildRunner.createAgent")
 	}
 	return adk.NewRunner(ctx, adk.RunnerConfig{
 		Agent:           agent,
@@ -303,9 +362,9 @@ func (c *Client) buildRunner(ctx context.Context, p RunParams, streaming bool) (
 
 // Generate performs a non-streaming completion via the ADK event loop.
 func (c *Client) Generate(ctx context.Context, prompt string, msgs []ChatMessage, p RunParams) (*Result, error) {
-	messages := toADKMessages(prompt, msgs)
+	messages := toADKMessages(prompt, msgs, p.VisualInputs)
 	if len(messages) == 0 {
-		return nil, fmt.Errorf("no input messages")
+		return nil, log.NewError("eino.Client.Generate.validate", "no input messages")
 	}
 	runner, err := c.buildRunner(ctx, p, false)
 	if err != nil {
@@ -325,7 +384,6 @@ func (c *Client) Generate(ctx context.Context, prompt string, msgs []ChatMessage
 			break
 		}
 		if event.Err != nil {
-			log.Errorf("eino.Client.Generate.event: %v", event.Err)
 			return nil, log.WrapError(event.Err, "eino.Client.Generate.agentEvent")
 		}
 		if event.Output == nil || event.Output.MessageOutput == nil {
@@ -341,7 +399,7 @@ func (c *Client) Generate(ctx context.Context, prompt string, msgs []ChatMessage
 		// Assistant text and the safe, direct GenerateImage Markdown are visible.
 		// Other tool results may contain raw JSON or command output and stay hidden.
 		if action, ok := actionprotocol.Parse(msg.Content); ok {
-			return nil, fmt.Errorf("client action %s requires streaming execution", action.Capability)
+			return nil, log.NewError("eino.Client.Generate.clientAction", "client action %s requires streaming execution", action.Capability)
 		}
 		if isUserVisibleMessage(msg) {
 			res.Content = msg.Content
@@ -364,9 +422,9 @@ func (c *Client) Generate(ctx context.Context, prompt string, msgs []ChatMessage
 // Stream performs a streaming completion via the ADK event loop, invoking
 // onChunk for each delta. It returns the aggregated content and final usage.
 func (c *Client) Stream(ctx context.Context, prompt string, msgs []ChatMessage, p RunParams, onChunk func(StreamChunk) error) (*Result, error) {
-	messages := toADKMessages(prompt, msgs)
+	messages := toADKMessages(prompt, msgs, p.VisualInputs)
 	if len(messages) == 0 {
-		return nil, fmt.Errorf("no input messages")
+		return nil, log.NewError("eino.Client.Stream.validate", "no input messages")
 	}
 	maxIter := p.MaxIterations
 	if maxIter <= 0 {
@@ -411,7 +469,7 @@ func (c *Client) Stream(ctx context.Context, prompt string, msgs []ChatMessage, 
 		messages = append(messages, schema.AssistantMessage("", toolCalls))
 		messages = append(messages, executed.Messages...)
 	}
-	return nil, fmt.Errorf("stream tool execution reached %d iteration limit", maxIter)
+	return nil, log.NewError("eino.Client.Stream.iterationLimit", "stream tool execution reached %d iteration limit", maxIter)
 }
 
 func (c *Client) streamMessages(ctx context.Context, messages []adk.Message, p RunParams, onChunk func(StreamChunk) error) (*Result, error) {
@@ -436,7 +494,6 @@ func (c *Client) streamMessages(ctx context.Context, messages []adk.Message, p R
 		}
 		res.StreamStats.Events++
 		if event.Err != nil {
-			log.Errorf("eino.Client.Stream.event: %v", event.Err)
 			return nil, log.WrapError(event.Err, "eino.Client.Stream.agentEvent")
 		}
 		if event.Output == nil || event.Output.MessageOutput == nil {
@@ -451,7 +508,7 @@ func (c *Client) streamMessages(ctx context.Context, messages []adk.Message, p R
 			}
 			if action, ok := actionprotocol.Parse(mv.Message.Content); ok {
 				if p.OnAction == nil {
-					return nil, fmt.Errorf("client action %s has no action sink", action.Capability)
+					return nil, log.NewError("eino.Client.Stream.clientAction", "client action %s has no action sink", action.Capability)
 				}
 				if err := p.OnAction(action); err != nil {
 					return nil, log.WrapError(err, "eino.Client.Stream.onAction")
@@ -494,7 +551,7 @@ func (c *Client) streamMessages(ctx context.Context, messages []adk.Message, p R
 	if handled {
 		if action, ok := actionprotocol.Parse(content); ok {
 			if p.OnAction == nil {
-				return nil, fmt.Errorf("client action %s has no action sink", action.Capability)
+				return nil, log.NewError("eino.Client.Stream.textClientAction", "client action %s has no action sink", action.Capability)
 			}
 			if err := p.OnAction(action); err != nil {
 				return nil, log.WrapError(err, "eino.Client.Stream.onTextAction")
@@ -547,52 +604,121 @@ func mergeResult(dst, src *Result) {
 func (c *Client) executeToolCalls(ctx context.Context, toolCalls []schema.ToolCall, p RunParams, onChunk func(StreamChunk) error) (*toolExecutionResult, error) {
 	toolByName, err := toolMap(ctx, buildAgentTools(p))
 	if err != nil {
-		return nil, err
+		return nil, log.WrapError(err, "eino.Client.executeToolCalls.toolMap")
 	}
 
-	result := &toolExecutionResult{Messages: make([]adk.Message, 0, len(toolCalls))}
+	invocations := make([]toolInvocation, len(toolCalls))
 	for i, call := range toolCalls {
-		name := strings.TrimSpace(call.Function.Name)
-		callID := strings.TrimSpace(call.ID)
-		if callID == "" {
-			callID = fmt.Sprintf("call_%d", i+1)
-		}
-		provider, ok := toolByName[name]
-		if !ok {
-			result.Messages = append(result.Messages, schema.ToolMessage(toolErrorObservation(fmt.Errorf("tool %s is unavailable", name)), callID, schema.WithToolName(name)))
-			continue
-		}
-		invokable, ok := provider.(tool.InvokableTool)
-		if !ok {
-			result.Messages = append(result.Messages, schema.ToolMessage(toolErrorObservation(fmt.Errorf("tool %s is not invokable", name)), callID, schema.WithToolName(name)))
-			continue
-		}
+		invocations[i] = resolveToolInvocation(call, i, toolByName)
+	}
+	executeToolInvocations(ctx, invocations)
 
-		output, err := invokable.InvokableRun(ctx, call.Function.Arguments)
-		if err != nil {
-			result.Messages = append(result.Messages, schema.ToolMessage(toolErrorObservation(err), callID, schema.WithToolName(name)))
+	result := &toolExecutionResult{Messages: make([]adk.Message, 0, len(toolCalls))}
+	for _, invocation := range invocations {
+		if invocation.err != nil {
+			result.Messages = append(result.Messages, schema.ToolMessage(toolErrorObservation(invocation.err), invocation.callID, schema.WithToolName(invocation.name)))
 			continue
 		}
-		if action, ok := actionprotocol.Parse(output); ok {
+		if action, ok := actionprotocol.Parse(invocation.output); ok {
 			if p.OnAction == nil {
-				return nil, fmt.Errorf("client action %s has no action sink", action.Capability)
+				return nil, log.NewError("eino.Client.executeToolCalls.clientAction", "client action %s has no action sink", action.Capability)
 			}
 			if err := p.OnAction(action); err != nil {
-				return nil, err
+				return nil, log.WrapError(err, "eino.Client.executeToolCalls.onAction")
 			}
 			result.ActionCount++
 			continue
 		}
-		if isUserVisibleToolName(name) {
-			result.Content += output
-			if err := onChunk(StreamChunk{Text: output}); err != nil {
-				return nil, err
+		if isUserVisibleToolName(invocation.name) {
+			result.Content += invocation.output
+			if err := onChunk(StreamChunk{Text: invocation.output}); err != nil {
+				return nil, log.WrapError(err, "eino.Client.executeToolCalls.emitChunk")
 			}
 			continue
 		}
-		result.Messages = append(result.Messages, schema.ToolMessage(output, callID, schema.WithToolName(name)))
+		result.Messages = append(result.Messages, schema.ToolMessage(invocation.output, invocation.callID, schema.WithToolName(invocation.name)))
 	}
 	return result, nil
+}
+
+func resolveToolInvocation(call schema.ToolCall, index int, toolByName map[string]tool.BaseTool) toolInvocation {
+	name := strings.TrimSpace(call.Function.Name)
+	callID := strings.TrimSpace(call.ID)
+	if callID == "" {
+		callID = fmt.Sprintf("call_%d", index+1)
+	}
+	invocation := toolInvocation{name: name, callID: callID, arguments: call.Function.Arguments}
+	provider, ok := toolByName[name]
+	if !ok {
+		invocation.err = log.NewError("eino.Client.resolveToolInvocation", "tool %s is unavailable", name)
+		return invocation
+	}
+	invokable, ok := provider.(tool.InvokableTool)
+	if !ok {
+		invocation.err = log.NewError("eino.Client.resolveToolInvocation", "tool %s is not invokable", name)
+		return invocation
+	}
+	invocation.tool = invokable
+	return invocation
+}
+
+// executeToolInvocations preserves model call order while allowing contiguous
+// read-only capabilities to run concurrently. Mutating calls remain barriers.
+func executeToolInvocations(ctx context.Context, invocations []toolInvocation) {
+	for i := 0; i < len(invocations); {
+		if !isReadOnlyToolInvocation(invocations[i]) {
+			runToolInvocation(ctx, &invocations[i])
+			i++
+			continue
+		}
+
+		end := i + 1
+		for end < len(invocations) && isReadOnlyToolInvocation(invocations[end]) {
+			end++
+		}
+		runReadOnlyToolInvocations(ctx, invocations[i:end])
+		i = end
+	}
+}
+
+func isReadOnlyToolInvocation(invocation toolInvocation) bool {
+	return invocation.err == nil && invocation.tool != nil && tools.GlobalRegistry.IsReadOnly(invocation.name)
+}
+
+func runReadOnlyToolInvocations(ctx context.Context, invocations []toolInvocation) {
+	workers := min(len(invocations), constant.DefaultParallelToolWorkers)
+	if workers <= 1 {
+		if len(invocations) == 1 {
+			runToolInvocation(ctx, &invocations[0])
+		}
+		return
+	}
+
+	jobs := make(chan int, len(invocations))
+	for i := range invocations {
+		jobs <- i
+	}
+	close(jobs)
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for range workers {
+		log.Go(func() {
+			defer wg.Done()
+			for index := range jobs {
+				runToolInvocation(ctx, &invocations[index])
+			}
+		})
+	}
+	wg.Wait()
+}
+
+func runToolInvocation(ctx context.Context, invocation *toolInvocation) {
+	if invocation == nil || invocation.err != nil {
+		return
+	}
+	callCtx := tools.WithToolCallID(ctx, invocation.callID)
+	invocation.output, invocation.err = invocation.tool.InvokableRun(callCtx, invocation.arguments)
 }
 
 func toolMap(ctx context.Context, values []tool.BaseTool) (map[string]tool.BaseTool, error) {
@@ -603,7 +729,7 @@ func toolMap(ctx context.Context, values []tool.BaseTool) (map[string]tool.BaseT
 		}
 		info, err := value.Info(ctx)
 		if err != nil {
-			return nil, err
+			return nil, log.WrapError(err, "eino.Client.toolMap.Info")
 		}
 		if info == nil || strings.TrimSpace(info.Name) == "" {
 			continue
@@ -640,7 +766,10 @@ func finalizeStreamResult(res *Result) error {
 		return fmt.Errorf("model stream returned empty content without usage or client action (events=%d chunks=%d visible_chunks=%d empty_chunks=%d tool_call_chunks=%d reasoning_chunks=%d usage_chunks=%d)",
 			s.Events, s.Chunks, s.VisibleChunks, s.EmptyChunks, s.ToolCallChunks, s.ReasoningChunks, s.UsageChunks)
 	}
-	return nil
+	s := res.StreamStats
+	return fmt.Errorf("model stream returned empty content despite token usage (events=%d chunks=%d visible_chunks=%d empty_chunks=%d tool_call_chunks=%d reasoning_chunks=%d usage_chunks=%d prompt_tokens=%d completion_tokens=%d total_tokens=%d)",
+		s.Events, s.Chunks, s.VisibleChunks, s.EmptyChunks, s.ToolCallChunks, s.ReasoningChunks, s.UsageChunks,
+		res.Usage.PromptTokens, res.Usage.CompletionTokens, res.Usage.TotalTokens)
 }
 
 func (c *Client) emitDelta(msg *schema.Message, res *Result, onChunk func(StreamChunk) error) error {

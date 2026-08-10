@@ -3,11 +3,27 @@ package tools
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
+	"github.com/good-fish-man/agent-runtime/internal/observability"
 	log "github.com/good-fish-man/logx"
 )
+
+type toolCallIDContextKey struct{}
+
+// WithToolCallID preserves the provider's tool_call_id through the common
+// execution boundary so model, tool, and observation logs can be correlated.
+func WithToolCallID(ctx context.Context, callID string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if callID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, toolCallIDContextKey{}, callID)
+}
 
 // ValidationResult 验证结果
 type ValidationResult struct {
@@ -51,20 +67,42 @@ func TraceTool(t tool.BaseTool) tool.BaseTool {
 }
 
 func (a *Adapter) Info(ctx context.Context) (*schema.ToolInfo, error) {
-	return a.tool.Info(ctx)
+	info, err := a.tool.Info(ctx)
+	return info, log.WrapError(err, "tool.Adapter.Info")
 }
 
-func (a *Adapter) InvokableRun(ctx context.Context, input string, opts ...tool.Option) (string, error) {
+func (a *Adapter) InvokableRun(ctx context.Context, input string, opts ...tool.Option) (result string, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	name := a.name(ctx)
+	operation := "tool." + name + ".InvokableRun"
+	callID, _ := ctx.Value(toolCallIDContextKey{}).(string)
+	span := observability.Begin(ctx, "tool", name, callID,
+		"arguments_bytes", len(input),
+		"read_only", GlobalRegistry.IsReadOnly(name),
+	)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = log.NewError(operation, "panic: %v", recovered)
+			log.ErrorfCtx(ctx, "tool call panic tool=%s error=%v\n%s", name, recovered, debug.Stack())
+		}
+		span.End(err, "output_bytes", len(result))
+	}()
+
+	if contextErr := ctx.Err(); contextErr != nil {
+		return "", log.WrapError(contextErr, operation)
+	}
 	if v, ok := a.tool.(OptionalValidateTool); ok {
-		if result := v.ValidateInput(ctx, input); !result.Valid {
-			return "", &ValidationError{Message: result.Message, Code: result.ErrorCode}
+		if validation := v.ValidateInput(ctx, input); validation != nil && !validation.Valid {
+			return "", log.WrapError(&ValidationError{Message: validation.Message, Code: validation.ErrorCode}, "tool."+name+".ValidateInput")
 		}
 	}
-	result, err := a.invokable.InvokableRun(ctx, input, opts...)
-	if err == nil {
-		return result, nil
+	result, err = a.invokable.InvokableRun(ctx, input, opts...)
+	if err != nil {
+		err = log.WrapError(err, operation)
 	}
-	return result, log.WrapError(err, "tool."+a.name(ctx)+".InvokableRun")
+	return result, err
 }
 
 func (a *Adapter) name(ctx context.Context) string {

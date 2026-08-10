@@ -107,3 +107,24 @@ func TestAnalyzeExtractsExactUserURL(t *testing.T) {
 		t.Fatalf("unexpected plan: %+v", plan)
 	}
 }
+
+func TestAnalyzeRecognizesLearnAboutAsResearch(t *testing.T) {
+	plan := Analyze("帮我了解一下 MCP", map[string]any{"locale": "zh-CN"}, time.Now())
+	if plan.Kind != KindResearch || len(plan.Queries) < 2 {
+		t.Fatalf("learn-about request did not enter research: %+v", plan)
+	}
+}
+
+func TestAnalyzeOfficialProcedureUsesCurrentAuthoritativeResearch(t *testing.T) {
+	now := time.Date(2026, time.August, 10, 9, 0, 0, 0, time.UTC)
+	plan := Analyze("我是中国人，在日本工作，想把中国驾照换成日本驾照，我应该怎么做", map[string]any{
+		"locale":   "zh-CN",
+		"timezone": "Asia/Tokyo",
+	}, now)
+	if plan.Kind != KindResearch || plan.MinSources < 3 || plan.Date != "2026-08-10" {
+		t.Fatalf("unexpected official procedure plan: %+v", plan)
+	}
+	if len(plan.Queries) < 2 || !strings.Contains(plan.Queries[0], plan.Date) || !strings.Contains(plan.Queries[1], "官方") {
+		t.Fatalf("official procedure queries are not date-bound and authority-focused: %+v", plan.Queries)
+	}
+}

@@ -11,10 +11,14 @@ import (
 type Protocol struct {
 	MaxSearches          int
 	MaxFetches           int
+	MaxResearchRounds    int
+	ResultsPerSearch     int
 	MaxPlannerIterations int
 	MaxExecutionTime     time.Duration
 	SearchCacheTTL       time.Duration
 	FetchCacheTTL        time.Duration
+	ResearchCacheTTL     time.Duration
+	NewsCacheTTL         time.Duration
 	MaxContextChars      int
 	SearchInterval       time.Duration
 	FetchInterval        time.Duration
@@ -26,12 +30,16 @@ type Protocol struct {
 // DefaultProtocol implements Agent Protocol v1.0 limits.
 func DefaultProtocol() Protocol {
 	return Protocol{
-		MaxSearches:          2,
-		MaxFetches:           3,
+		MaxSearches:          6,
+		MaxFetches:           8,
+		MaxResearchRounds:    3,
+		ResultsPerSearch:     5,
 		MaxPlannerIterations: 6,
-		MaxExecutionTime:     20 * time.Second,
+		MaxExecutionTime:     30 * time.Second,
 		SearchCacheTTL:       5 * time.Minute,
 		FetchCacheTTL:        time.Hour,
+		ResearchCacheTTL:     time.Hour,
+		NewsCacheTTL:         5 * time.Minute,
 		MaxContextChars:      80_000, // Approximately 20k tokens.
 		SearchInterval:       200 * time.Millisecond,
 		FetchInterval:        500 * time.Millisecond,
@@ -49,6 +57,12 @@ func (p Protocol) normalized() Protocol {
 	if p.MaxFetches <= 0 {
 		p.MaxFetches = defaults.MaxFetches
 	}
+	if p.MaxResearchRounds <= 0 {
+		p.MaxResearchRounds = defaults.MaxResearchRounds
+	}
+	if p.ResultsPerSearch <= 0 {
+		p.ResultsPerSearch = defaults.ResultsPerSearch
+	}
 	if p.MaxPlannerIterations <= 0 {
 		p.MaxPlannerIterations = defaults.MaxPlannerIterations
 	}
@@ -60,6 +74,12 @@ func (p Protocol) normalized() Protocol {
 	}
 	if p.FetchCacheTTL <= 0 {
 		p.FetchCacheTTL = defaults.FetchCacheTTL
+	}
+	if p.ResearchCacheTTL <= 0 {
+		p.ResearchCacheTTL = defaults.ResearchCacheTTL
+	}
+	if p.NewsCacheTTL <= 0 {
+		p.NewsCacheTTL = defaults.NewsCacheTTL
 	}
 	if p.MaxContextChars <= 0 {
 		p.MaxContextChars = defaults.MaxContextChars
@@ -104,6 +124,10 @@ type Metrics struct {
 	SearchCalls       int
 	FetchCalls        int
 	CacheHits         int
+	AdvisorCalls      int
+	PromptTokens      int
+	CompletionTokens  int
+	TotalTokens       int
 	ElapsedMS         int64
 }
 

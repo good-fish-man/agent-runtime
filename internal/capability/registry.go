@@ -134,6 +134,36 @@ func ModelName(id string) string {
 	return strings.NewReplacer(".", "_", "-", "_").Replace(id)
 }
 
+// IsClientBound reports whether a capability executes on the user's device
+// rather than on the server. Client-bound tools return an actionprotocol
+// payload that must be dispatched through an OnAction sink, so they can only be
+// fulfilled by the streaming execution path.
+func IsClientBound(id string) bool {
+	return strings.HasPrefix(id, "browser.") || strings.HasPrefix(id, "desktop.")
+}
+
+// ClientBoundModelNames returns the model function names of every registered
+// client-bound capability. Used to strip these tools from non-streaming runs,
+// where their actions cannot be dispatched.
+func (r *Registry) ClientBoundModelNames() []string {
+	r.mu.RLock()
+	names := make([]string, 0)
+	for id := range r.entries {
+		if IsClientBound(id) {
+			names = append(names, ModelName(id))
+		}
+	}
+	r.mu.RUnlock()
+	sort.Strings(names)
+	return names
+}
+
+// ClientBoundModelNames returns the model function names of every registered
+// client-bound capability in the global registry.
+func ClientBoundModelNames() []string {
+	return GlobalRegistry.ClientBoundModelNames()
+}
+
 // Wrap exposes a concrete provider through a capability contract.
 func Wrap(definition Definition, provider tool.BaseTool) tool.BaseTool {
 	if provider == nil {

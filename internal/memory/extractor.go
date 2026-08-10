@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
 	"github.com/good-fish-man/agent-runtime/internal/constant"
 	"github.com/good-fish-man/agent-runtime/internal/eino"
+	"github.com/good-fish-man/agent-runtime/internal/observability"
+	log "github.com/good-fish-man/logx"
 )
 
 // Extractor extracts structured memories from a conversation turn using an
@@ -47,7 +48,7 @@ func (e *Extractor) Extract(ctx context.Context, userInput, assistantOutput stri
 	prompt := buildExtractionPrompt(userInput, assistantOutput)
 	raw, err := e.callLLM(ctx, apiKey, prompt)
 	if err != nil {
-		return nil, err
+		return nil, log.WrapError(err, "memory.Extractor.Extract.callLLM")
 	}
 
 	var parsed struct {
@@ -59,7 +60,7 @@ func (e *Extractor) Extract(ctx context.Context, userInput, assistantOutput stri
 		} `json:"memories"`
 	}
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
-		return nil, fmt.Errorf("parse extraction result: %w", err)
+		return nil, log.WrapError(err, "memory.Extractor.Extract.parseResponse")
 	}
 
 	out := make([]ExtractedMemory, 0, len(parsed.Memories))
@@ -78,7 +79,28 @@ func (e *Extractor) Extract(ctx context.Context, userInput, assistantOutput stri
 	return out, nil
 }
 
-func (e *Extractor) callLLM(ctx context.Context, apiKey, prompt string) (string, error) {
+func (e *Extractor) callLLM(ctx context.Context, apiKey, prompt string) (result string, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	span := observability.Begin(ctx, "model", e.model.Name, "",
+		"provider", e.model.Provider,
+		"mode", "memory_extract",
+		"message_count", 1,
+		"bound_tool_count", 0,
+	)
+	var finishReason string
+	var promptTokens, completionTokens, totalTokens, responseBytes int
+	defer func() {
+		span.End(err,
+			"finish_reason", finishReason,
+			"prompt_tokens", promptTokens,
+			"completion_tokens", completionTokens,
+			"total_tokens", totalTokens,
+			"response_bytes", responseBytes,
+		)
+	}()
+
 	reqBody := map[string]any{
 		"model":           e.model.Name,
 		"messages":        []map[string]any{{"role": "user", "content": prompt}},
@@ -86,27 +108,28 @@ func (e *Extractor) callLLM(ctx context.Context, apiKey, prompt string) (string,
 	}
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
+		return "", log.WrapError(err, "memory.Extractor.callLLM.marshalRequest")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.apiBase+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
+		return "", log.WrapError(err, "memory.Extractor.callLLM.createRequest")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	resp, err := e.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("call LLM: %w", err)
+		return "", log.WrapError(err, "memory.Extractor.callLLM.request")
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("read response: %w", err)
+		return "", log.WrapError(err, "memory.Extractor.callLLM.readResponse")
 	}
+	responseBytes = len(respBody)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("LLM returned status %d: %s", resp.StatusCode, string(respBody))
+		return "", log.NewError("memory.Extractor.callLLM.status", "LLM returned status %d: %s", resp.StatusCode, truncateModelError(respBody))
 	}
 
 	var openAIResp struct {
@@ -114,15 +137,33 @@ func (e *Extractor) callLLM(ctx context.Context, apiKey, prompt string) (string,
 			Message struct {
 				Content string `json:"content"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal(respBody, &openAIResp); err != nil {
-		return "", fmt.Errorf("parse LLM response: %w", err)
+		return "", log.WrapError(err, "memory.Extractor.callLLM.parseResponse")
 	}
 	if len(openAIResp.Choices) == 0 {
-		return "", fmt.Errorf("LLM returned no choices")
+		return "", log.NewError("memory.Extractor.callLLM.validateResponse", "LLM returned no choices")
 	}
+	finishReason = openAIResp.Choices[0].FinishReason
+	promptTokens = openAIResp.Usage.PromptTokens
+	completionTokens = openAIResp.Usage.CompletionTokens
+	totalTokens = openAIResp.Usage.TotalTokens
 	return cleanJSONBlock(openAIResp.Choices[0].Message.Content), nil
+}
+
+func truncateModelError(body []byte) string {
+	const maxErrorBytes = 4096
+	if len(body) <= maxErrorBytes {
+		return strings.TrimSpace(string(body))
+	}
+	return strings.TrimSpace(string(body[:maxErrorBytes])) + "..."
 }
 
 // cleanJSONBlock strips markdown code fences around a JSON payload.

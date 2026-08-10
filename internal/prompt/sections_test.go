@@ -66,6 +66,7 @@ func TestGetUsingCapabilitiesSectionAddsWebResearchRules(t *testing.T) {
 		"current_location object",
 		`status "no_results" or "search_unavailable" is recoverable`,
 		"Never repeat the same query",
+		"Never open or control the user's local browser as a research fallback",
 		"exact URL supplied by the user or returned by internet.search",
 		`status "fetch_error" or "http_error" is recoverable`,
 		"Resolve relative dates",
@@ -79,11 +80,16 @@ func TestGetUsingCapabilitiesSectionAddsWebResearchRules(t *testing.T) {
 	}
 }
 
-func TestGetUsingCapabilitiesSectionAddsBrowserFallbackWorkflow(t *testing.T) {
+func TestGetUsingCapabilitiesSectionSeparatesBrowserExecutionFromResearch(t *testing.T) {
 	section := GetUsingCapabilitiesSection([]string{capability.InternetSearch, capability.InternetFetch, capability.BrowserSearch, capability.BrowserRead, capability.BrowserAction, capability.BrowserClose})
-	for _, required := range []string{"Public browser research", "call browser.search automatically", "Never ask the user to paste a source URL", "2-4 browser.read calls", "Do not call browser.close merely because an answer is complete", "Never use it to submit purchases"} {
+	for _, required := range []string{"Local browser execution", "Never ask the user to start Chrome with remote debugging", "Do not claim that browser control is unavailable before invoking", "operate the user's visible device", "Never use them as a fallback for an informational or research request", "browser execution, not web research", "session_id only identifies retained browser state", "browser_task.completed is true", "show a search in my local browser", "Do not call browser.close merely because a browser task is complete", "Never use it to submit purchases"} {
 		if !strings.Contains(section, required) {
-			t.Fatalf("browser fallback section does not contain %q:\n%s", required, section)
+			t.Fatalf("browser execution section does not contain %q:\n%s", required, section)
+		}
+	}
+	for _, forbidden := range []string{"call browser.search automatically", "Never ask the user to paste a source URL", "2-4 browser.read calls"} {
+		if strings.Contains(section, forbidden) {
+			t.Fatalf("browser execution section still encourages research fallback %q:\n%s", forbidden, section)
 		}
 	}
 }

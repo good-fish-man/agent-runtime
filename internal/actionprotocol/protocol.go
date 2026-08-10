@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const Protocol = "athena.agent.v2"
+const Protocol = "athena.agent.v3"
 
 const (
 	TypeAction = "ACTION"

@@ -15,6 +15,7 @@ const (
 	SystemShell        = "system.shell"
 	SystemWait         = "system.wait"
 	BrowserSearch      = "browser.search"
+	BrowserTask        = "browser.task"
 	BrowserOpen        = "browser.open"
 	BrowserNavigate    = "browser.navigate"
 	BrowserLogin       = "browser.login"
@@ -24,6 +25,7 @@ const (
 	BrowserWait        = "browser.wait"
 	BrowserDownload    = "browser.download"
 	BrowserScreenshot  = "browser.screenshot"
+	BrowserAutomation  = "browser.automation"
 	BrowserClose       = "browser.close"
 	DesktopAction      = "desktop.action"
 	PlanningTodo       = "planning.todo"
@@ -54,6 +56,7 @@ func init() {
 		{Definition{ID: SystemShell, Description: "Execute a shell command inside the authorized project workspace", Input: map[string]string{"command": "string"}, Output: "CommandResult", Risk: "high"}, "Bash"},
 		{Definition{ID: SystemWait, Description: "Wait for a bounded duration", Input: map[string]string{"seconds": "number"}, Output: "WaitResult", ReadOnly: true}, "Sleep"},
 		{Definition{ID: BrowserSearch, Description: "Search public pages with a real browser", Input: map[string]string{"query": "string"}, Output: "BrowserSearchResult", ReadOnly: true}, "BrowserSearch"},
+		{Definition{ID: BrowserTask, Description: "Execute a reversible browser task through the local Browser System and return structured observations", Input: map[string]string{"goal": "string", "session_id": "string", "target": "string", "query": "string"}, Output: "BrowserTaskResult", Risk: "medium"}, "BrowserTask"},
 		{Definition{ID: BrowserOpen, Description: "Open a website by URL or discoverable name in a controllable browser session", Input: map[string]string{"target": "string"}, Output: "BrowserSession", Risk: "medium"}, "BrowserOpen"},
 		{Definition{ID: BrowserNavigate, Description: "Navigate an existing browser session to an exact URL", Input: map[string]string{"session_id": "string", "url": "string"}, Output: "BrowserObservation", Risk: "medium"}, "BrowserNavigate"},
 		{Definition{ID: BrowserLogin, Description: "Open a user-visible browser for interactive authentication", Input: map[string]string{"url": "string"}, Output: "BrowserSession", Risk: "medium"}, "BrowserLogin"},
@@ -63,6 +66,7 @@ func init() {
 		{Definition{ID: BrowserWait, Description: "Wait briefly for the current browser session to settle", Input: map[string]string{"session_id": "string", "milliseconds": "integer"}, Output: "BrowserObservation", ReadOnly: true}, "BrowserAction"},
 		{Definition{ID: BrowserScreenshot, Description: "Capture a screenshot of the current browser page", Input: map[string]string{"session_id": "string"}, Output: "BrowserScreenshot", ReadOnly: true}, "BrowserAction"},
 		{Definition{ID: BrowserDownload, Description: "Download a user-requested file by clicking a semantic browser ref", Input: map[string]string{"session_id": "string", "ref": "string", "filename": "string"}, Output: "BrowserDownload", Risk: "medium"}, "BrowserAction"},
+		{Definition{ID: BrowserAutomation, Description: "Manage safe event-driven browser watch rules", Input: map[string]string{"operation": "string", "session_id": "string"}, Output: "BrowserAutomationRule", Risk: "medium"}, "BrowserAutomation"},
 		{Definition{ID: BrowserClose, Description: "Close a browser session", Input: map[string]string{"session_id": "string"}, Output: "CloseResult", Risk: "medium"}, "BrowserClose"},
 		{Definition{ID: DesktopAction, Description: "Open, observe, and control an installed application through an authorized desktop session", Input: map[string]string{"action": "string", "session_id": "string"}, Output: "DesktopActionRequest", Risk: "medium"}, "DesktopAction"},
 		{Definition{ID: PlanningTodo, Description: "Track the current execution plan", Input: map[string]string{"todos": "Todo[]"}, Output: "Todo[]"}, "TodoWrite"},

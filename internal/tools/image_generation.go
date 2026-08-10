@@ -15,10 +15,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"time"
 
 	"github.com/good-fish-man/agent-runtime/internal/constant"
+	"github.com/good-fish-man/agent-runtime/internal/observability"
 	"github.com/good-fish-man/agent-runtime/internal/types"
 	log "github.com/good-fish-man/logx"
 
@@ -78,7 +80,25 @@ func (t *ImageGenerationTool) InvokableRun(ctx context.Context, input string, _ 
 	return fmt.Sprintf("![Generated image](%s)", imageURL), nil
 }
 
-func (t *ImageGenerationTool) generate(ctx context.Context, request ImageGenerationRequest) (string, error) {
+func (t *ImageGenerationTool) generate(ctx context.Context, request ImageGenerationRequest) (imageURL string, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	span := observability.Begin(ctx, "model", t.model.Name, "",
+		"provider", t.model.Provider,
+		"mode", "image_generate",
+		"has_source_image", strings.TrimSpace(request.SourceURL) != "",
+	)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = log.NewError("ImageGenerationTool.generate", "panic: %v", recovered)
+			log.ErrorfCtx(ctx, "model call panic model=%s mode=image_generate error=%v\n%s", t.model.Name, recovered, debug.Stack())
+		} else if err != nil {
+			err = log.WrapError(err, "ImageGenerationTool.generate")
+		}
+		span.End(err, "output_present", imageURL != "")
+	}()
+
 	if strings.TrimSpace(request.Prompt) == "" {
 		return "", fmt.Errorf("prompt is required")
 	}
@@ -89,8 +109,6 @@ func (t *ImageGenerationTool) generate(ctx context.Context, request ImageGenerat
 		return "", fmt.Errorf("local model is disabled by the administrator")
 	}
 	provider := strings.ToLower(strings.ReplaceAll(t.model.Provider, " ", ""))
-	var imageURL string
-	var err error
 	if request.SourceURL != "" {
 		switch provider {
 		case constant.ProviderDiffusers:

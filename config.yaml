@@ -25,6 +25,24 @@ memory:
   background_review: true
   max_review_memory: 10
 
+research:
+  enabled: true
+  providers: ["web", "github", "wikipedia", "arxiv", "news"]
+  max_queries: 6
+  max_pages: 8
+  max_rounds: 3
+  results_per_query: 5
+  timeout_sec: 30
+  cache_ttl_min: 60
+  news_cache_ttl_min: 5
+  provider_timeout_sec: 10
+  provider_failure_threshold: 3
+  circuit_open_sec: 120
+  model_planning: true
+  semantic_verification: true
+  advisor_timeout_sec: 8
+  max_advisor_claims: 8
+
 # Host file search and application launch. Enable only on a trusted local
 # desktop installation; keep disabled on shared or remotely hosted runtimes.
 skills:

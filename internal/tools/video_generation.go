@@ -12,11 +12,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/good-fish-man/agent-runtime/internal/constant"
+	"github.com/good-fish-man/agent-runtime/internal/observability"
 	"github.com/good-fish-man/agent-runtime/internal/types"
 	log "github.com/good-fish-man/logx"
 
@@ -90,7 +92,25 @@ type videoJob struct {
 
 // GenerateVideo calls an OpenAI-compatible asynchronous video endpoint.
 // Provider adapters can be added here without changing the public RPC.
-func GenerateVideo(ctx context.Context, model types.ModelConfig, input VideoGenerationRequest) (*VideoGenerationResult, error) {
+func GenerateVideo(ctx context.Context, model types.ModelConfig, input VideoGenerationRequest) (result *VideoGenerationResult, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	span := observability.Begin(ctx, "model", model.Name, "",
+		"provider", model.Provider,
+		"mode", "video_generate",
+		"has_source_image", strings.TrimSpace(input.SourceURL) != "",
+	)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = log.NewError("GenerateVideo", "panic: %v", recovered)
+			log.ErrorfCtx(ctx, "model call panic model=%s mode=video_generate error=%v\n%s", model.Name, recovered, debug.Stack())
+		} else if err != nil {
+			err = log.WrapError(err, "GenerateVideo")
+		}
+		span.End(err, "output_present", result != nil && result.URL != "")
+	}()
+
 	if strings.TrimSpace(input.Prompt) == "" {
 		return nil, fmt.Errorf("prompt is required")
 	}

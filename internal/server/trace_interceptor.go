@@ -24,10 +24,11 @@ func UnaryTraceInterceptor() grpc.UnaryServerInterceptor {
 		log.InfowCtx(ctx, "grpc request started", "method", info.FullMethod)
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				err = status.Errorf(codes.Internal, "panic: %v", recovered)
+				err = log.GRPCError(log.NewError("server.UnaryTraceInterceptor.panic", "panic: %v", recovered), codes.Internal, "server.UnaryTraceInterceptor", "")
 				log.ErrorfCtx(ctx, "grpc panic method=%s err=%v\n%s", info.FullMethod, recovered, debug.Stack())
 			}
 			logGRPCCompletion(ctx, info.FullMethod, time.Since(started), err)
+			err = errorForGRPCTransport(err)
 		}()
 		response, err = handler(ctx, req)
 		return response, err
@@ -47,14 +48,29 @@ func StreamTraceInterceptor() grpc.StreamServerInterceptor {
 		log.InfowCtx(ctx, "grpc stream started", "method", info.FullMethod)
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				err = status.Errorf(codes.Internal, "panic: %v", recovered)
+				err = log.GRPCError(log.NewError("server.StreamTraceInterceptor.panic", "panic: %v", recovered), codes.Internal, "server.StreamTraceInterceptor", "")
 				log.ErrorfCtx(ctx, "grpc stream panic method=%s err=%v\n%s", info.FullMethod, recovered, debug.Stack())
 			}
 			logGRPCCompletion(ctx, info.FullMethod, time.Since(started), err)
+			err = errorForGRPCTransport(err)
 		}()
 		err = handler(srv, traceServerStream{ServerStream: stream, ctx: ctx})
 		return err
 	}
+}
+
+// errorForGRPCTransport keeps captured runtime source frames in the error sent
+// to Runtime Client while retaining the original gRPC status code. Plain
+// status errors remain unchanged.
+func errorForGRPCTransport(err error) error {
+	if err == nil {
+		return nil
+	}
+	detail := log.FormatError(err)
+	if detail == err.Error() {
+		return err
+	}
+	return status.Error(status.Code(err), detail)
 }
 
 func requestTraceID(req any) string {

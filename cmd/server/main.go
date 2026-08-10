@@ -23,6 +23,9 @@ import (
 	"github.com/good-fish-man/agent-runtime/internal/dispatcher"
 	"github.com/good-fish-man/agent-runtime/internal/eino"
 	"github.com/good-fish-man/agent-runtime/internal/memory"
+	"github.com/good-fish-man/agent-runtime/internal/research"
+	researchevidence "github.com/good-fish-man/agent-runtime/internal/research/evidence"
+	"github.com/good-fish-man/agent-runtime/internal/research/searchsystem"
 	"github.com/good-fish-man/agent-runtime/internal/server"
 	"github.com/good-fish-man/agent-runtime/internal/tools"
 	log "github.com/good-fish-man/logx"
@@ -56,6 +59,32 @@ func serve(configPath string, quit <-chan os.Signal) (bool, error) {
 		return false, fmt.Errorf("load config: %w", err)
 	}
 
+	var researchRunner research.Runner
+	if cfg.Research.Enabled {
+		cacheDir := cfg.Research.CacheDir
+		if err := researchevidence.ValidateCacheDir(cacheDir); err != nil {
+			log.Warnf("persistent research cache disabled: %v", err)
+			cacheDir = ""
+		}
+		protocol := research.DefaultProtocol()
+		protocol.MaxSearches = cfg.Research.MaxQueries
+		protocol.MaxFetches = cfg.Research.MaxPages
+		protocol.MaxResearchRounds = cfg.Research.MaxRounds
+		protocol.ResultsPerSearch = cfg.Research.ResultsPerQuery
+		protocol.MaxExecutionTime = time.Duration(cfg.Research.TimeoutSec) * time.Second
+		protocol.ResearchCacheTTL = time.Duration(cfg.Research.CacheTTLMin) * time.Minute
+		protocol.NewsCacheTTL = time.Duration(cfg.Research.NewsCacheTTLMin) * time.Minute
+		researchRunner = research.NewResearchAgentWithConfig(research.AgentConfig{
+			Protocol: protocol, CacheDir: cacheDir, Providers: cfg.Research.Providers,
+			Resilience: searchsystem.ResilienceConfig{
+				Timeout:          time.Duration(cfg.Research.ProviderTimeoutSec) * time.Second,
+				FailureThreshold: cfg.Research.ProviderFailureThreshold,
+				OpenDuration:     time.Duration(cfg.Research.CircuitOpenSec) * time.Second,
+			},
+		})
+		log.Infof("research agent enabled providers=%v cache_dir=%s", cfg.Research.Providers, cacheDir)
+	}
+
 	srvCfg := server.Config{
 		DefaultModel: eino.ModelConfig{
 			Provider: cfg.Server.Model.Provider,
@@ -64,13 +93,19 @@ func serve(configPath string, quit <-chan os.Signal) (bool, error) {
 			APIBase:  cfg.Server.Model.APIBase,
 		},
 		Dispatch: dispatcher.Config{
-			SandboxImage:     cfg.Sandbox.DefaultImage,
-			SandboxPptxImage: cfg.Sandbox.PptxImage,
-			SandboxWorkdir:   cfg.Sandbox.Workdir,
-			SandboxTimeoutMs: cfg.Sandbox.TimeoutMs,
-			SkillsDir:        cfg.Skills.Dir,
-			SkillsConfigPath: cfg.Skills.ConfigPath,
-			SkillsGlobalDir:  cfg.Skills.GlobalDir,
+			SandboxImage:             cfg.Sandbox.DefaultImage,
+			SandboxPptxImage:         cfg.Sandbox.PptxImage,
+			SandboxWorkdir:           cfg.Sandbox.Workdir,
+			SandboxTimeoutMs:         cfg.Sandbox.TimeoutMs,
+			SkillsDir:                cfg.Skills.Dir,
+			SkillsConfigPath:         cfg.Skills.ConfigPath,
+			SkillsGlobalDir:          cfg.Skills.GlobalDir,
+			ResearchRunner:           researchRunner,
+			DisableResearch:          !cfg.Research.Enabled,
+			ResearchModelPlanning:    cfg.Research.ModelPlanning,
+			ResearchSemanticVerify:   cfg.Research.SemanticVerification,
+			ResearchAdvisorTimeout:   time.Duration(cfg.Research.AdvisorTimeoutSec) * time.Second,
+			ResearchMaxAdvisorClaims: cfg.Research.MaxAdvisorClaims,
 		},
 	}
 

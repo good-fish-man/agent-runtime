@@ -20,6 +20,7 @@ import (
 	"github.com/good-fish-man/agent-runtime/internal/dispatcher"
 	"github.com/good-fish-man/agent-runtime/internal/eino"
 	"github.com/good-fish-man/agent-runtime/internal/memory"
+	"github.com/good-fish-man/agent-runtime/internal/research"
 	"github.com/good-fish-man/agent-runtime/internal/tools"
 	"github.com/good-fish-man/agent-runtime/internal/types"
 	log "github.com/good-fish-man/logx"
@@ -345,7 +346,7 @@ func (s *Server) GenerateMedia(ctx context.Context, req *runtimev1.MediaGenerati
 			Prompt: req.GetPrompt(), NegativePrompt: req.GetNegativePrompt(), SourceURL: req.GetSourceUrl(), Size: req.GetSize(), Quality: req.GetQuality(),
 		})
 		if err != nil {
-			return nil, status.Errorf(codes.Internal, "generate image: %v", err)
+			return nil, log.GRPCError(err, codes.Internal, "Server.GenerateMedia.GenerateImage", "generate image")
 		}
 		response.MediaUrl, response.MimeType = url, "image/png"
 	case "video":
@@ -353,7 +354,7 @@ func (s *Server) GenerateMedia(ctx context.Context, req *runtimev1.MediaGenerati
 			Prompt: req.GetPrompt(), SourceURL: req.GetSourceUrl(), Size: req.GetSize(), DurationSeconds: int(req.GetDurationSeconds()),
 		})
 		if err != nil {
-			return nil, status.Errorf(codes.Internal, "generate video: %v", err)
+			return nil, log.GRPCError(err, codes.Internal, "Server.GenerateMedia.GenerateVideo", "generate video")
 		}
 		response.MediaUrl, response.MimeType, response.ProviderJobId = result.URL, "video/mp4", result.ProviderJobID
 	default:
@@ -448,6 +449,24 @@ func (s *Server) streamCompletion(
 		}
 	}()
 
+	disp.SetResearchProgressHandler(func(progress research.Progress) error {
+		actionID := "research-" + traceID
+		payload, payloadErr := structpb.NewStruct(map[string]any{
+			"protocol": "athena.research.v3", "type": "PROGRESS", "task_id": traceID,
+			"action_id": actionID, "capability": "research.execute", "stage": progress.Stage,
+			"message": progress.Message, "progress": progress.Percent, "round": progress.Round,
+			"queries": progress.Queries, "sources": progress.Sources, "confidence": progress.Confidence,
+			"query_texts":    researchQueryTextsPayload(progress.QueryTexts),
+			"valuable_pages": researchPagesPayload(progress.ValuablePages), "completed": progress.Completed,
+		})
+		if payloadErr != nil {
+			return payloadErr
+		}
+		return emit(&runtimev1.StreamEvent{Payload: &runtimev1.StreamEvent_ToolResult{ToolResult: &runtimev1.ToolResultEvent{
+			Id: actionID, Tool: "research.progress", Output: payload, Success: true,
+		}}})
+	})
+
 	res, err := disp.RunStream(runCtx, prompt, msgs, func(ch eino.StreamChunk) error {
 		return emit(&runtimev1.StreamEvent{
 			Payload: &runtimev1.StreamEvent_Delta{Delta: &runtimev1.DeltaEvent{
@@ -505,6 +524,35 @@ func (s *Server) streamCompletion(
 	})
 	s.reviewMemories(mc, scope.sessionID, scope.userID, scope.agentID, scope.userInput, res.Content)
 	return log.WrapError(err, "Server.streamCompletion.emitDone")
+}
+
+func researchQueryTextsPayload(values []string) []any {
+	result := make([]any, 0, len(values))
+	for _, value := range values {
+		if value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func researchPagesPayload(pages []research.ValuablePage) []any {
+	result := make([]any, 0, len(pages))
+	for _, page := range pages {
+		signals := make([]any, 0, len(page.ValueSignals))
+		for _, signal := range page.ValueSignals {
+			signals = append(signals, signal)
+		}
+		result = append(result, map[string]any{
+			"id": page.ID, "rank": page.Rank, "title": page.Title, "url": page.URL,
+			"domain": page.Domain, "provider": page.Provider, "kind": page.Kind,
+			"snippet": page.Snippet, "value_signals": signals,
+			"authority": page.Authority, "relevance": page.Relevance,
+			"freshness": page.Freshness, "evidence_score": page.EvidenceScore,
+			"fetched": page.Fetched, "published_at": page.PublishedAt,
+		})
+	}
+	return result
 }
 
 // memScope carries per-request memory identifiers and user input for the

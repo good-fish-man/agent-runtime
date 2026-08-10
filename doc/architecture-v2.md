@@ -1,5 +1,7 @@
 # Athena Agent Architecture v2
 
+> Historical baseline: the current wire protocol is `athena.agent.v3`. Version 3 keeps these layer boundaries and adds transient, bounded Observation attachments for native multimodal evidence.
+
 Athena separates reasoning from device execution. The LLM may propose an abstract action, but it never calls operating-system APIs, browser automation binaries, or local applications directly.
 
 ```mermaid
@@ -45,7 +47,7 @@ flowchart TD
 
 ## Control Protocol
 
-All envelopes use protocol `athena.agent.v2` and include correlation, ordering, expiry, and retry safety.
+In the historical v2 baseline, all envelopes used protocol `athena.agent.v2` and included correlation, ordering, expiry, and retry safety.
 
 ### Action
 
@@ -136,4 +138,4 @@ WebSocket message types are `HELLO`, `WELCOME`, `HEARTBEAT`, `HEARTBEAT_ACK`, `A
 
 Version 2 does not parse executable JSON from assistant text. Typed Action and Observation events are connected end to end through the Runtime Client control plane. The UI never executes an action based on model-rendered content.
 
-The `athena.agent.v2` envelope, closed enums, service boundaries, and risk defaults are frozen. New device behavior must be introduced as a capability carried by the same Action/Observation protocol. A breaking field, enum, transport, or ownership change requires a new protocol version and migration document; it must not be added as a special JSON marker, assistant-text parser, or frontend execution endpoint.
+The `athena.agent.v2` envelope was frozen and is now superseded by `athena.agent.v3`; see `action-observation-v3.md`. The closed service boundaries and prohibition on special JSON markers, assistant-text parsers, and frontend execution relays still apply.

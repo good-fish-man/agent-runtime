@@ -206,6 +206,16 @@ type RunRequest struct {
 	Options        *RunOptions            `json:"options"`
 	Sandbox        *SandboxConfig         `json:"sandbox"`
 	Files          []FileConfig           `json:"files"` // 上传的文件列表
+	VisualInputs   []VisualInput          `json:"visual_inputs,omitempty"`
+}
+
+type VisualInput struct {
+	ID       string `json:"id"`
+	MIMEType string `json:"mime_type"`
+	Data     []byte `json:"data"`
+	SHA256   string `json:"sha256"`
+	Purpose  string `json:"purpose,omitempty"`
+	Detail   string `json:"detail,omitempty"`
 }
 
 type CapabilityConfig struct {

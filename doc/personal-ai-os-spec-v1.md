@@ -115,7 +115,7 @@ Agent Runtime is the reasoning engine. It transforms natural language into struc
 | Intent Analyzer | Extract goal, constraints, target environment, expected result, urgency, and ambiguity |
 | Planner | Create, revise, and bound execution plans |
 | Capability Selector | Select relevant capabilities instead of dumping all tools into every prompt |
-| Action Generator | Produce typed `athena.agent.v2` Actions |
+| Action Generator | Produce typed `athena.agent.v3` Actions |
 | Stream Tool Executor | Consume streamed tool-call chunks, execute capabilities, feed Observations back to the model, and continue to final output |
 | Evaluator | Compare Observation with the step postcondition |
 | Memory Reviewer | Extract durable preferences and facts after a conversation |
@@ -478,7 +478,7 @@ Challenge example:
 
 ## Versioning
 
-This document is a product architecture specification. Wire-level compatibility is governed by `athena.agent.v2` in the Action/Observation protocol. If a future version changes ownership boundaries, transport semantics, risk policy, session rules, or capability envelopes, it must be documented as a new major version.
+This document is a product architecture specification. Wire-level compatibility is governed by `athena.agent.v3` in the Action/Observation protocol. If a future version changes ownership boundaries, transport semantics, risk policy, session rules, or capability envelopes, it must be documented as a new major version.
 
 # 个人 AI 操作系统规格 v1.0
 
@@ -630,4 +630,4 @@ Perception Layer
 
 ## 版本规则
 
-本文是产品架构规格。线级兼容性以 `athena.agent.v2` Action/Observation 协议为准。未来如果改变职责边界、传输语义、风险策略、会话规则或 capability envelope，必须作为新的大版本设计，不能用临时 JSON、模型文本解析或前端转发链路绕过去。
+本文是产品架构规格。线级兼容性以 `athena.agent.v3` Action/Observation 协议为准。未来如果改变职责边界、传输语义、风险策略、会话规则或 capability envelope，必须作为新的大版本设计，不能用临时 JSON、模型文本解析或前端转发链路绕过去。

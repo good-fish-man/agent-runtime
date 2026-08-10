@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/good-fish-man/agent-runtime/internal/constant"
 
@@ -17,11 +18,12 @@ import (
 
 // Config is the root configuration.
 type Config struct {
-	Server  ServerConfig  `yaml:"server"`
-	DB      DBConfig      `yaml:"db"`
-	Memory  MemoryConfig  `yaml:"memory"`
-	Sandbox SandboxConfig `yaml:"sandbox"`
-	Skills  SkillsConfig  `yaml:"skills"`
+	Server   ServerConfig   `yaml:"server"`
+	DB       DBConfig       `yaml:"db"`
+	Memory   MemoryConfig   `yaml:"memory"`
+	Research ResearchConfig `yaml:"research"`
+	Sandbox  SandboxConfig  `yaml:"sandbox"`
+	Skills   SkillsConfig   `yaml:"skills"`
 }
 
 // ServerConfig holds listen addresses and default model settings.
@@ -62,6 +64,27 @@ type MemoryConfig struct {
 	BackgroundReview bool `yaml:"background_review"`
 	MaxReviewMemory  int  `yaml:"max_review_memory"`
 	InjectIntoPrompt bool `yaml:"inject_into_prompt"`
+}
+
+// ResearchConfig controls the code-owned multi-source research loop.
+type ResearchConfig struct {
+	Enabled                  bool     `yaml:"enabled"`
+	Providers                []string `yaml:"providers"`
+	MaxQueries               int      `yaml:"max_queries"`
+	MaxPages                 int      `yaml:"max_pages"`
+	MaxRounds                int      `yaml:"max_rounds"`
+	ResultsPerQuery          int      `yaml:"results_per_query"`
+	TimeoutSec               int      `yaml:"timeout_sec"`
+	CacheDir                 string   `yaml:"cache_dir"`
+	CacheTTLMin              int      `yaml:"cache_ttl_min"`
+	NewsCacheTTLMin          int      `yaml:"news_cache_ttl_min"`
+	ProviderTimeoutSec       int      `yaml:"provider_timeout_sec"`
+	ProviderFailureThreshold int      `yaml:"provider_failure_threshold"`
+	CircuitOpenSec           int      `yaml:"circuit_open_sec"`
+	ModelPlanning            bool     `yaml:"model_planning"`
+	SemanticVerification     bool     `yaml:"semantic_verification"`
+	AdvisorTimeoutSec        int      `yaml:"advisor_timeout_sec"`
+	MaxAdvisorClaims         int      `yaml:"max_advisor_claims"`
 }
 
 // SandboxConfig holds operator-tunable defaults for skill sandbox execution.
@@ -105,6 +128,25 @@ func Default() Config {
 			BackgroundReview: true,
 			MaxReviewMemory:  constant.DefaultMaxReviewMemory,
 			InjectIntoPrompt: true,
+		},
+		Research: ResearchConfig{
+			Enabled:                  true,
+			Providers:                []string{"web", "github", "wikipedia", "arxiv", "news"},
+			MaxQueries:               constant.DefaultResearchMaxQueries,
+			MaxPages:                 constant.DefaultResearchMaxPages,
+			MaxRounds:                constant.DefaultResearchMaxRounds,
+			ResultsPerQuery:          constant.DefaultResearchResults,
+			TimeoutSec:               constant.DefaultResearchTimeoutSec,
+			CacheDir:                 defaultResearchCacheDir(),
+			CacheTTLMin:              constant.DefaultResearchCacheTTLMin,
+			NewsCacheTTLMin:          constant.DefaultNewsCacheTTLMin,
+			ProviderTimeoutSec:       constant.DefaultProviderTimeoutSec,
+			ProviderFailureThreshold: constant.DefaultProviderFailures,
+			CircuitOpenSec:           constant.DefaultCircuitOpenSec,
+			ModelPlanning:            true,
+			SemanticVerification:     true,
+			AdvisorTimeoutSec:        8,
+			MaxAdvisorClaims:         8,
 		},
 		Sandbox: SandboxConfig{
 			DefaultImage: constant.DefaultSandboxImage,
@@ -160,6 +202,9 @@ func resolveSkillPaths(cfg *Config, configPath string) {
 			*target = filepath.Clean(filepath.Join(baseDir, *target))
 		}
 	}
+	if cfg.Research.CacheDir != "" && !filepath.IsAbs(cfg.Research.CacheDir) {
+		cfg.Research.CacheDir = filepath.Clean(filepath.Join(baseDir, cfg.Research.CacheDir))
+	}
 }
 
 // applyEnvOverrides lets environment variables win over the YAML file so
@@ -191,6 +236,42 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv(constant.EnvGlobalSkillsDir); v != "" {
 		cfg.Skills.GlobalDir = v
+	}
+	if v := os.Getenv(constant.EnvResearchCacheDir); v != "" {
+		cfg.Research.CacheDir = v
+	}
+	if v := os.Getenv(constant.EnvResearchProviders); v != "" {
+		cfg.Research.Providers = splitCSV(v)
+	}
+	applyPositiveIntEnv(constant.EnvResearchMaxQueries, &cfg.Research.MaxQueries)
+	applyPositiveIntEnv(constant.EnvResearchMaxPages, &cfg.Research.MaxPages)
+	applyPositiveIntEnv(constant.EnvResearchMaxRounds, &cfg.Research.MaxRounds)
+	applyPositiveIntEnv(constant.EnvResearchTimeoutSec, &cfg.Research.TimeoutSec)
+}
+
+func defaultResearchCacheDir() string {
+	if dir, err := os.UserCacheDir(); err == nil && dir != "" {
+		return filepath.Join(dir, "Athena", "research")
+	}
+	return filepath.Join(os.TempDir(), "athena", "research-cache")
+}
+
+func splitCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			result = append(result, part)
+		}
+	}
+	return result
+}
+
+func applyPositiveIntEnv(name string, target *int) {
+	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
+			*target = parsed
+		}
 	}
 }
 

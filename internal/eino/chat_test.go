@@ -2,9 +2,13 @@ package eino
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/good-fish-man/agent-runtime/internal/constant"
 	"github.com/good-fish-man/agent-runtime/internal/tools"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -15,6 +19,32 @@ type fakeObservationTool struct {
 	name   string
 	input  string
 	output string
+}
+
+type concurrentObservationTool struct {
+	active atomic.Int32
+	peak   atomic.Int32
+}
+
+func (t *concurrentObservationTool) Info(context.Context) (*schema.ToolInfo, error) {
+	return &schema.ToolInfo{Name: "Read"}, nil
+}
+
+func (t *concurrentObservationTool) InvokableRun(ctx context.Context, input string, _ ...tool.Option) (string, error) {
+	current := t.active.Add(1)
+	defer t.active.Add(-1)
+	for {
+		observed := t.peak.Load()
+		if current <= observed || t.peak.CompareAndSwap(observed, current) {
+			break
+		}
+	}
+	select {
+	case <-time.After(20 * time.Millisecond):
+		return input, nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
 }
 
 func (f *fakeObservationTool) Info(context.Context) (*schema.ToolInfo, error) {
@@ -104,10 +134,10 @@ func TestFinalizeStreamResultRejectsEmptyNoUsageNoAction(t *testing.T) {
 	}
 }
 
-func TestFinalizeStreamResultAllowsEmptyWithUsage(t *testing.T) {
+func TestFinalizeStreamResultRejectsEmptyWithUsage(t *testing.T) {
 	err := finalizeStreamResult(&Result{FinishReason: "stop", Usage: Usage{PromptTokens: 10, TotalTokens: 10}})
-	if err != nil {
-		t.Fatalf("expected empty response with usage to pass through, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "despite token usage") || !strings.Contains(err.Error(), "total_tokens=10") {
+		t.Fatalf("expected diagnostic empty response error, got %v", err)
 	}
 }
 
@@ -328,5 +358,39 @@ func TestExecuteToolCallsRecordsUnavailableToolAsObservation(t *testing.T) {
 	msg := result.Messages[0]
 	if msg.ToolName != "missing_tool" || !strings.Contains(msg.Content, "unavailable") {
 		t.Fatalf("tool message = %+v", msg)
+	}
+}
+
+func TestExecuteToolCallsRunsReadOnlyCapabilitiesWithBoundedConcurrency(t *testing.T) {
+	readTool := &concurrentObservationTool{}
+	calls := make([]schema.ToolCall, constant.DefaultParallelToolWorkers+4)
+	for i := range calls {
+		calls[i] = schema.ToolCall{
+			ID:   fmt.Sprintf("call-read-%d", i),
+			Type: "function",
+			Function: schema.FunctionCall{
+				Name:      "Read",
+				Arguments: fmt.Sprintf(`{"index":%d}`, i),
+			},
+		}
+	}
+
+	result, err := (&Client{}).executeToolCalls(context.Background(), calls, RunParams{
+		ExtraTools:          []tool.BaseTool{readTool},
+		DisableBuiltinTools: true,
+	}, func(StreamChunk) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Messages) != len(calls) {
+		t.Fatalf("messages = %d, want %d", len(result.Messages), len(calls))
+	}
+	if peak := readTool.peak.Load(); peak <= 1 || peak > constant.DefaultParallelToolWorkers {
+		t.Fatalf("peak concurrency = %d, want 2..%d", peak, constant.DefaultParallelToolWorkers)
+	}
+	for i, message := range result.Messages {
+		if message.ToolCallID != calls[i].ID || message.Content != calls[i].Function.Arguments {
+			t.Fatalf("message[%d] = %+v, want call %s", i, message, calls[i].ID)
+		}
 	}
 }

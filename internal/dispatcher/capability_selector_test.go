@@ -1,10 +1,15 @@
 package dispatcher
 
 import (
+	"context"
 	"testing"
 
 	"github.com/good-fish-man/agent-runtime/internal/capability"
+	"github.com/good-fish-man/agent-runtime/internal/eino"
+	"github.com/good-fish-man/agent-runtime/internal/intent"
 	"github.com/good-fish-man/agent-runtime/internal/plugins"
+	"github.com/good-fish-man/agent-runtime/internal/research"
+	athenarouter "github.com/good-fish-man/agent-runtime/internal/router"
 	"github.com/good-fish-man/agent-runtime/internal/types"
 )
 
@@ -29,6 +34,29 @@ func TestSelectRelevantSkills(t *testing.T) {
 	selected := selectRelevantSkills(skills, "请分析这个 CSV 并生成图表", 2)
 	if len(selected) == 0 || selected[0].ID != "csv" {
 		t.Fatalf("selected = %v, want csv first", skillNames(selected))
+	}
+}
+
+func TestBrowserCapabilitiesExcludeLegacyAgentBrowserSkill(t *testing.T) {
+	d := &Dispatcher{
+		req: &types.RunRequest{},
+		availableSkills: []types.Skill{
+			{ID: "agent-browser", Name: "agent-browser", Description: "Control a browser and open websites"},
+			{ID: "unrelated", Name: "unrelated", Description: "Unrelated skill"},
+		},
+	}
+
+	text := capabilityText("open YouTube", nil)
+	d.req.Skills = selectRelevantSkills(d.availableSkills, text, 3)
+	plan := athenarouter.RouteIntent(intent.Parse(intent.Request{Text: "open YouTube"}))
+	if !d.usesBrowserCapabilities(plan) {
+		t.Fatal("open YouTube should select native browser capabilities")
+	}
+	d.req.Skills = withoutSkills(d.req.Skills, "agent-browser")
+	for _, skill := range d.req.Skills {
+		if skill.ID == "agent-browser" {
+			t.Fatal("legacy agent-browser skill must not coexist with native browser capabilities")
+		}
 	}
 }
 
@@ -57,13 +85,15 @@ func TestSelectBuiltinToolsForImplicitWebResearch(t *testing.T) {
 	}
 	for _, prompt := range tests {
 		selected := selectBuiltinCapabilities(prompt, false)
-		for _, wanted := range []string{capability.InternetSearch, capability.InternetFetch, capability.BrowserSearch, capability.BrowserNavigate, capability.BrowserRead, capability.BrowserObserve} {
+		for _, wanted := range []string{capability.InternetSearch, capability.InternetFetch} {
 			if !contains(selected, wanted) {
 				t.Errorf("prompt %q did not enable %s: %v", prompt, wanted, selected)
 			}
 		}
-		if contains(selected, capability.BrowserClose) {
-			t.Errorf("prompt %q should not enable browser.close by default: %v", prompt, selected)
+		for _, unwanted := range []string{capability.BrowserSearch, capability.BrowserTask, capability.BrowserNavigate, capability.BrowserRead, capability.BrowserObserve, capability.BrowserAction, capability.BrowserClose} {
+			if contains(selected, unwanted) {
+				t.Errorf("prompt %q should not control the local browser through %s: %v", prompt, unwanted, selected)
+			}
 		}
 	}
 }
@@ -76,6 +106,142 @@ func TestBrowserCloseRequiresExplicitCloseIntent(t *testing.T) {
 	closeSelected := selectBuiltinCapabilities("关闭浏览器", false)
 	if !contains(closeSelected, capability.BrowserClose) {
 		t.Fatalf("browser.close not selected for explicit close intent: %v", closeSelected)
+	}
+}
+
+func TestCurrentVideoQuitUsesBrowserTaskInsteadOfClosingSession(t *testing.T) {
+	selected := selectBuiltinCapabilities("Quite current video", false)
+	if !contains(selected, capability.BrowserTask) || !contains(selected, capability.BrowserAction) {
+		t.Fatalf("current video quit did not select browser task capabilities: %v", selected)
+	}
+	if contains(selected, capability.BrowserClose) {
+		t.Fatalf("current video quit selected whole-session close: %v", selected)
+	}
+}
+
+func TestDirectBrowserCommandExcludesResearchAndDesktopTools(t *testing.T) {
+	plan := athenarouter.RouteIntent(intent.Parse(intent.Request{Text: "Open youtub home page and play the second vido"}))
+	d := &Dispatcher{
+		req: &types.RunRequest{Context: map[string]any{"browser_controller": true, "desktop_bridge": true}},
+	}
+	_, selected := d.buildTools(context.Background(), plan)
+	for _, wanted := range []string{capability.BrowserTask, capability.BrowserObserve, capability.BrowserAction} {
+		if !contains(selected, wanted) {
+			t.Fatalf("direct browser capabilities %v missing %s", selected, wanted)
+		}
+	}
+	for _, unwanted := range []string{capability.InternetSearch, capability.InternetFetch, capability.BrowserSearch, capability.BrowserOpen, capability.BrowserNavigate, capability.BrowserRead, capability.DesktopAction} {
+		if contains(selected, unwanted) {
+			t.Fatalf("direct browser command selected %s: %v", unwanted, selected)
+		}
+	}
+}
+
+func TestConfiguredSearchCannotOverrideDirectBrowserRouting(t *testing.T) {
+	plan := athenarouter.RouteIntent(intent.Parse(intent.Request{Text: "Open youtub home page and play the second vido"}))
+	d := &Dispatcher{
+		req: &types.RunRequest{
+			Context: map[string]any{"browser_controller": true, "desktop_bridge": true},
+			Capabilities: []types.CapabilityConfig{
+				{ID: capability.InternetSearch},
+				{ID: capability.InternetFetch},
+			},
+		},
+	}
+	_, selected := d.buildTools(context.Background(), plan)
+	for _, unwanted := range []string{capability.InternetSearch, capability.InternetFetch, capability.BrowserSearch, capability.DesktopAction} {
+		if contains(selected, unwanted) {
+			t.Fatalf("configured capability overrode direct browser routing with %s: %v", unwanted, selected)
+		}
+	}
+}
+
+func TestPreviousBrowserCommandDoesNotDisableCurrentResearch(t *testing.T) {
+	d := &Dispatcher{req: &types.RunRequest{Context: map[string]any{"browser_controller": true}}}
+	d.prepareCapabilities(context.Background(), "Find today's technology news", []eino.ChatMessage{{Role: "user", Content: "Open YouTube home page"}})
+	selected := d.capabilityIDs
+	for _, wanted := range []string{capability.InternetSearch, capability.InternetFetch} {
+		if !contains(selected, wanted) {
+			t.Fatalf("previous browser command disabled current %s capability: %v", wanted, selected)
+		}
+	}
+}
+
+func TestActiveBrowserAndConfiguredToolsCannotOverrideResearchRouting(t *testing.T) {
+	prompt := "想切换驾照，我应该怎么做"
+	d := &Dispatcher{req: &types.RunRequest{
+		Context: map[string]any{
+			"browser_controller":     true,
+			"desktop_bridge":         true,
+			"active_browser_session": "athena-active-session",
+			"active_desktop_session": "desktop-active-session",
+		},
+		Capabilities: []types.CapabilityConfig{
+			{ID: capability.BrowserTask},
+			{ID: capability.BrowserSearch},
+			{ID: capability.BrowserAction},
+			{ID: capability.DesktopAction},
+		},
+	}}
+	d.prepareCapabilities(context.Background(), prompt, []eino.ChatMessage{{Role: "user", Content: "Open YouTube and play a music video"}})
+	if d.routePlan.Primary != athenarouter.RouteResearch {
+		t.Fatalf("official procedure route = %s, want research: %+v", d.routePlan.Primary, d.routePlan)
+	}
+	for _, unwanted := range []string{capability.BrowserTask, capability.BrowserSearch, capability.BrowserAction, capability.BrowserObserve, capability.DesktopAction} {
+		if contains(d.capabilityIDs, unwanted) {
+			t.Fatalf("configured or active device capability %s escaped research isolation: %v", unwanted, d.capabilityIDs)
+		}
+	}
+	for _, wanted := range []string{capability.InternetSearch, capability.InternetFetch} {
+		if !contains(d.capabilityIDs, wanted) {
+			t.Fatalf("research capability %s missing: %v", wanted, d.capabilityIDs)
+		}
+	}
+}
+
+func TestActiveBrowserAndConfiguredToolsDoNotPolluteConversation(t *testing.T) {
+	d := &Dispatcher{req: &types.RunRequest{
+		Context: map[string]any{
+			"browser_controller":     true,
+			"active_browser_session": "athena-active-session",
+		},
+		Capabilities: []types.CapabilityConfig{
+			{ID: capability.BrowserTask},
+			{ID: capability.BrowserSearch},
+			{ID: capability.BrowserObserve},
+		},
+	}}
+	d.prepareCapabilities(context.Background(), "Tell me a joke", []eino.ChatMessage{{Role: "user", Content: "Open YouTube and play a music video"}})
+	if d.routePlan.Primary != athenarouter.RouteConversation {
+		t.Fatalf("conversation route = %s, want conversation: %+v", d.routePlan.Primary, d.routePlan)
+	}
+	for _, unwanted := range []string{capability.BrowserTask, capability.BrowserSearch, capability.BrowserObserve, capability.BrowserAction} {
+		if contains(d.capabilityIDs, unwanted) {
+			t.Fatalf("active session exposed %s to an unrelated conversation: %v", unwanted, d.capabilityIDs)
+		}
+	}
+}
+
+type recordingResearchRunner struct {
+	calls int
+}
+
+func (r *recordingResearchRunner) Execute(context.Context, research.Plan) (research.Evidence, error) {
+	r.calls++
+	return research.Evidence{}, nil
+}
+
+func TestDirectBrowserCommandDoesNotInheritPreviousResearch(t *testing.T) {
+	runner := &recordingResearchRunner{}
+	d := &Dispatcher{
+		req:              &types.RunRequest{Messages: []types.Message{{Role: "user", Content: "Find today's technology news"}}},
+		researchExecutor: runner,
+	}
+	if err := d.prepareResearch(context.Background(), "Open youtub home page and play the second vido"); err != nil {
+		t.Fatal(err)
+	}
+	if runner.calls != 0 {
+		t.Fatalf("research executed %d times for a direct browser command", runner.calls)
 	}
 }
 
@@ -96,7 +262,7 @@ func TestLocalDeviceIntentsSelectDedicatedTools(t *testing.T) {
 		t.Fatalf("application capability not selected: %v", appCapabilities)
 	}
 	websiteCapabilities := selectBuiltinCapabilities("帮我打开 Acme Portal", false)
-	if !contains(websiteCapabilities, capability.DesktopAction) || !contains(websiteCapabilities, capability.BrowserOpen) || !contains(websiteCapabilities, capability.BrowserNavigate) || !contains(websiteCapabilities, capability.BrowserObserve) {
+	if !contains(websiteCapabilities, capability.DesktopAction) || !contains(websiteCapabilities, capability.BrowserTask) || !contains(websiteCapabilities, capability.BrowserOpen) || !contains(websiteCapabilities, capability.BrowserNavigate) || !contains(websiteCapabilities, capability.BrowserObserve) {
 		t.Fatalf("generic open-target capabilities not selected: %v", websiteCapabilities)
 	}
 	if contains(websiteCapabilities, capability.BrowserClose) {
@@ -128,7 +294,7 @@ func TestAuthenticatedPageEnablesBrowserSessionTools(t *testing.T) {
 
 func TestBrowserExtendedIntentsSelectRuntimeCapabilities(t *testing.T) {
 	downloadSelected := selectBuiltinCapabilities("打开页面以后下载这个 PDF 文件", false)
-	for _, want := range []string{capability.BrowserOpen, capability.BrowserObserve, capability.BrowserAction, capability.BrowserDownload} {
+	for _, want := range []string{capability.BrowserTask, capability.BrowserOpen, capability.BrowserObserve, capability.BrowserAction, capability.BrowserDownload} {
 		if !contains(downloadSelected, want) {
 			t.Fatalf("download browser capabilities %v missing %s", downloadSelected, want)
 		}

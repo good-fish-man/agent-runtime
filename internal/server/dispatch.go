@@ -37,6 +37,15 @@ func (s *Server) newAgentDispatcher(client *eino.Client, req *runtimev1.AgentReq
 	for _, configured := range req.GetCapabilities() {
 		tr.Capabilities = append(tr.Capabilities, types.CapabilityConfig{ID: configured.GetId(), Config: structMap(configured.GetConfig())})
 	}
+	for _, visual := range req.GetVisualInputs() {
+		if visual == nil {
+			continue
+		}
+		tr.VisualInputs = append(tr.VisualInputs, types.VisualInput{
+			ID: visual.GetId(), MIMEType: visual.GetMimeType(), Data: append([]byte(nil), visual.GetData()...),
+			SHA256: visual.GetSha256(), Purpose: visual.GetPurpose(), Detail: visual.GetDetail(),
+		})
+	}
 	return dispatcher.New(client, tr, projectDir(req.GetContext()), memInstruction, s.cfg.Dispatch)
 }
 
@@ -165,6 +174,15 @@ func toTypesRunRequest(req *runtimev1.RunRequest) *types.RunRequest {
 			VirtualPath: f.GetVirtualPath(),
 			Size:        f.GetSize(),
 			Type:        f.GetType(),
+		})
+	}
+	for _, visual := range req.GetVisualInputs() {
+		if visual == nil {
+			continue
+		}
+		tr.VisualInputs = append(tr.VisualInputs, types.VisualInput{
+			ID: visual.GetId(), MIMEType: visual.GetMimeType(), Data: append([]byte(nil), visual.GetData()...),
+			SHA256: visual.GetSha256(), Purpose: visual.GetPurpose(), Detail: visual.GetDetail(),
 		})
 	}
 

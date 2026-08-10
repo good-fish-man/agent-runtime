@@ -41,8 +41,12 @@ var (
 	newsKeywords       = []string{"新闻", "资讯", "头条", "要闻", "news", "headlines", "current events"}
 	travelKeywords     = []string{"旅行", "旅游", "行程", "出行", "度假", "自驾", "机票", "酒店", "住宿", "攻略", "travel", "trip", "itinerary", "vacation", "flight", "hotel"}
 	comparisonKeywords = []string{"推荐", "对比", "比较", "选型", "哪个好", "值得买吗", "购买建议", "recommend", "compare", "comparison", "best", "buying guide"}
-	researchKeywords   = []string{"调研", "研究", "查证", "核实", "搜索", "上网", "联网", "查询一下", "查一下", "来源", "引用", "research", "investigate", "verify", "search online", "look up", "browse", "sources", "citations"}
+	researchKeywords   = []string{"调研", "研究", "了解一下", "帮我了解", "查证", "核实", "搜索", "上网", "联网", "查询一下", "查一下", "来源", "引用", "research", "learn about", "tell me about", "investigate", "verify", "search online", "look up", "browse", "sources", "citations"}
 	weatherKeywords    = []string{"天气", "气温", "weather", "forecast", "temperature"}
+	procedureKeywords  = []string{
+		"驾照", "驾驶证", "换证", "签证", "护照", "在留卡", "居留", "永住", "入籍", "移民", "税务", "社会保险", "社保", "养老金", "行政手续", "办理流程", "申请条件", "所需材料", "官方手续", "许可证", "执照", "资格认证",
+		"driver's license", "driving license", "driving licence", "license conversion", "licence conversion", "visa", "passport", "residence permit", "immigration", "naturalization", "tax filing", "social security", "pension", "government procedure", "application process", "eligibility requirements", "required documents", "professional license",
+	}
 )
 
 // Analyze recognizes research-heavy work and creates bounded search queries.
@@ -88,6 +92,22 @@ func Analyze(prompt string, requestContext map[string]any, now time.Time) Plan {
 		}
 		return Plan{
 			Kind:             KindComparison,
+			Queries:          queries,
+			SeedURLs:         urls,
+			MinSources:       3,
+			MaxSources:       5,
+			Date:             date,
+			ResolvedRequest:  text,
+			ResponseLanguage: responseLanguage,
+		}
+	}
+	if containsAny(text, procedureKeywords) {
+		queries := uniqueQueries(text+" "+date, text+" 官方 申请条件 办理流程 所需材料")
+		if prefersEnglish(locale, text) {
+			queries = uniqueQueries(text+" "+date, text+" official requirements process required documents")
+		}
+		return Plan{
+			Kind:             KindResearch,
 			Queries:          queries,
 			SeedURLs:         urls,
 			MinSources:       3,

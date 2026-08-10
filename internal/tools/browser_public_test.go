@@ -9,8 +9,8 @@ import (
 	"github.com/good-fish-man/agent-runtime/internal/actionprotocol"
 )
 
-func TestBrowserOpenUsesDynamicTargetAndReturnsSession(t *testing.T) {
-	result, err := NewBrowserOpenTool().InvokableRun(context.Background(), `{"target":"Acme Portal"}`)
+func TestBrowserOpenUsesExactTargetAndReturnsSession(t *testing.T) {
+	result, err := NewBrowserOpenTool().InvokableRun(context.Background(), `{"target":"https://portal.example.com/"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -18,11 +18,46 @@ func TestBrowserOpenUsesDynamicTargetAndReturnsSession(t *testing.T) {
 	if err := json.Unmarshal([]byte(result), &request); err != nil {
 		t.Fatal(err)
 	}
-	if request.Capability != "browser.open" || request.SessionID == "" || request.Arguments["target"] != "Acme Portal" || request.Arguments["headed"] != true {
+	if request.Capability != "browser.open" || request.SessionID == "" || request.Arguments["target"] != "https://portal.example.com/" || request.Arguments["headed"] != true {
 		t.Fatalf("unexpected browser open request: %+v", request)
 	}
-	if destination, _ := request.Arguments["url"].(string); !strings.Contains(destination, "google.com/search") || !strings.Contains(destination, "Acme+Portal") {
-		t.Fatalf("website name was not dynamically resolved through search: %q", destination)
+	if destination, _ := request.Arguments["url"].(string); destination != "https://portal.example.com/" {
+		t.Fatalf("exact browser destination = %q", destination)
+	}
+}
+
+func TestBrowserOpenRejectsUnresolvedWebsiteName(t *testing.T) {
+	validation := NewBrowserOpenTool().ValidateInput(context.Background(), `{"target":"Acme Portal"}`)
+	if validation.Valid || !strings.Contains(validation.Message, "Search System") {
+		t.Fatalf("validation = %#v", validation)
+	}
+}
+
+func TestBrowserTaskEmitsTaskCapability(t *testing.T) {
+	result, err := NewBrowserTaskTool().InvokableRun(context.Background(), `{"goal":"Open YouTube and search AI Agent tutorials","target":"YouTube","query":"AI Agent tutorials"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var request actionprotocol.Action
+	if err := json.Unmarshal([]byte(result), &request); err != nil {
+		t.Fatal(err)
+	}
+	if request.Capability != "browser.task" || request.SessionID == "" || request.Arguments["goal"] == "" || request.Arguments["headed"] != true {
+		t.Fatalf("unexpected browser task request: %+v", request)
+	}
+}
+
+func TestBrowserTaskCanContinueExistingSession(t *testing.T) {
+	result, err := NewBrowserTaskTool().InvokableRun(context.Background(), `{"session_id":"athena-00000000000000000000000000000000","goal":"Search this page for AI Agent tutorials"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var request actionprotocol.Action
+	if err := json.Unmarshal([]byte(result), &request); err != nil {
+		t.Fatal(err)
+	}
+	if request.Capability != "browser.task" || request.SessionID != "athena-00000000000000000000000000000000" {
+		t.Fatalf("existing session was not preserved: %+v", request)
 	}
 }
 
@@ -53,6 +88,25 @@ func TestBrowserActionAcceptsReferencedTextInput(t *testing.T) {
 	}
 }
 
+func TestBrowserActionSupportsSemanticInteractionSet(t *testing.T) {
+	tool := NewBrowserActionTool()
+	for _, input := range []string{
+		`{"session_id":"athena-00000000000000000000000000000000","action":"hover","ref":"@e1"}`,
+		`{"session_id":"athena-00000000000000000000000000000000","action":"select","ref":"@e2","value":"Tokyo"}`,
+		`{"session_id":"athena-00000000000000000000000000000000","action":"drag","ref":"@e3","target_ref":"@e4"}`,
+		`{"session_id":"athena-00000000000000000000000000000000","action":"back"}`,
+		`{"session_id":"athena-00000000000000000000000000000000","action":"forward"}`,
+		`{"session_id":"athena-00000000000000000000000000000000","action":"refresh"}`,
+	} {
+		if validation := tool.ValidateInput(context.Background(), input); !validation.Valid {
+			t.Fatalf("browser action rejected %s: %s", input, validation.Message)
+		}
+	}
+	if tool.ValidateInput(context.Background(), `{"session_id":"athena-00000000000000000000000000000000","action":"drag","ref":"@e3","target_ref":"@e3"}`).Valid {
+		t.Fatal("drag accepted the same source and target ref")
+	}
+}
+
 func TestBrowserActionSupportsWaitScreenshotAndDownload(t *testing.T) {
 	tool := NewBrowserActionTool()
 	for _, test := range []struct {
@@ -77,6 +131,44 @@ func TestBrowserActionSupportsWaitScreenshotAndDownload(t *testing.T) {
 		if request.Capability != test.capability {
 			t.Fatalf("capability=%q want=%q request=%+v", request.Capability, test.capability, request)
 		}
+	}
+}
+
+func TestBrowserActionSupportsVerifiedPlayback(t *testing.T) {
+	tool := NewBrowserActionTool()
+	input := `{"session_id":"athena-00000000000000000000000000000000","action":"play"}`
+	if validation := tool.ValidateInput(context.Background(), input); !validation.Valid {
+		t.Fatalf("play action rejected: %#v", validation)
+	}
+	result, err := tool.InvokableRun(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var request actionprotocol.Action
+	if err := json.Unmarshal([]byte(result), &request); err != nil {
+		t.Fatal(err)
+	}
+	if request.Capability != "browser.play" || request.SessionID == "" {
+		t.Fatalf("unexpected playback request: %#v", request)
+	}
+}
+
+func TestBrowserActionSupportsPause(t *testing.T) {
+	tool := NewBrowserActionTool()
+	input := `{"session_id":"athena-00000000000000000000000000000000","action":"pause"}`
+	if validation := tool.ValidateInput(context.Background(), input); !validation.Valid {
+		t.Fatalf("pause action rejected: %#v", validation)
+	}
+	result, err := tool.InvokableRun(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var request actionprotocol.Action
+	if err := json.Unmarshal([]byte(result), &request); err != nil {
+		t.Fatal(err)
+	}
+	if request.Capability != "browser.pause" || request.SessionID == "" {
+		t.Fatalf("unexpected pause request: %#v", request)
 	}
 }
 

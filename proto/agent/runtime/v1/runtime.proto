@@ -87,6 +87,7 @@ message RunRequest {
   repeated FileConfig files = 15;
   string request_id = 16;
   string trace_id = 17;
+  repeated VisualInput visual_inputs = 18;
 }
 
 message RunResponse {
@@ -111,6 +112,7 @@ message AgentRequest {
   string request_id = 5;
   string trace_id = 6;
   repeated CapabilityConfig capabilities = 7;
+  repeated VisualInput visual_inputs = 8;
 }
 
 message AgentResponse {
@@ -525,4 +527,14 @@ message DoneEvent {
   ResponseMetadata metadata = 7;
   repeated MemoryEntry memories = 8;
   string checkpoint_id = 9;
+}
+
+// VisualInput is transient device evidence for the current model turn.
+message VisualInput {
+  string id = 1;
+  string mime_type = 2;
+  bytes data = 3;
+  string sha256 = 4;
+  string purpose = 5;
+  string detail = 6;
 }

@@ -6,7 +6,7 @@ import (
 )
 
 func TestCatalogContainsStablePublicCapabilities(t *testing.T) {
-	for _, id := range []string{InternetSearch, InternetFetch, GitHubSearch, WeatherCurrent, MapsRoute, FilesystemRead, PythonExecute} {
+	for _, id := range []string{InternetSearch, InternetFetch, GitHubSearch, WeatherCurrent, MapsRoute, FilesystemRead, BrowserTask, PythonExecute} {
 		if definition, ok := GlobalRegistry.Get(id); !ok || definition.ID != id {
 			t.Fatalf("capability %s is not registered: %+v", id, definition)
 		}
@@ -49,5 +49,38 @@ func TestRegistryRejectsDuplicateIDs(t *testing.T) {
 	}
 	if err := registry.Register(definition, nil); err == nil {
 		t.Fatal("duplicate capability registration was accepted")
+	}
+}
+
+func TestIsClientBound(t *testing.T) {
+	clientBound := []string{BrowserTask, BrowserOpen, BrowserSearch, BrowserClose, DesktopAction}
+	for _, id := range clientBound {
+		if !IsClientBound(id) {
+			t.Fatalf("capability %s should be client-bound", id)
+		}
+	}
+	serverBound := []string{InternetSearch, InternetFetch, FilesystemRead, InteractionAsk, ImageGenerate, VideoGenerate}
+	for _, id := range serverBound {
+		if IsClientBound(id) {
+			t.Fatalf("capability %s should not be client-bound", id)
+		}
+	}
+}
+
+func TestClientBoundModelNames(t *testing.T) {
+	names := GlobalRegistry.ClientBoundModelNames()
+	index := make(map[string]bool, len(names))
+	for _, name := range names {
+		index[name] = true
+	}
+	for _, want := range []string{ModelName(BrowserTask), ModelName(DesktopAction)} {
+		if !index[want] {
+			t.Fatalf("client-bound model names missing %q: %v", want, names)
+		}
+	}
+	for _, absent := range []string{ModelName(InternetSearch), ModelName(InteractionAsk), ModelName(ImageGenerate)} {
+		if index[absent] {
+			t.Fatalf("client-bound model names unexpectedly include %q: %v", absent, names)
+		}
 	}
 }

@@ -51,6 +51,14 @@ const (
 	EnvRuntimePublicURL         = "AGENT_RUNTIME_PUBLIC_URL"
 	EnvRuntimeClientInternalURL = "ATHENA_RUNTIME_CLIENT_INTERNAL_URL"
 	EnvInternalServiceToken     = "ATHENA_INTERNAL_SERVICE_TOKEN"
+	EnvResearchCacheDir         = "ATHENA_RESEARCH_CACHE_DIR"
+	EnvResearchProviders        = "ATHENA_RESEARCH_PROVIDERS"
+	EnvResearchMaxQueries       = "ATHENA_RESEARCH_MAX_QUERIES"
+	EnvResearchMaxPages         = "ATHENA_RESEARCH_MAX_PAGES"
+	EnvResearchMaxRounds        = "ATHENA_RESEARCH_MAX_ROUNDS"
+	EnvResearchTimeoutSec       = "ATHENA_RESEARCH_TIMEOUT_SEC"
+	EnvResearchGitHubToken      = "ATHENA_GITHUB_TOKEN"
+	EnvGitHubToken              = "GITHUB_TOKEN"
 	// EnvConfigPath points to the YAML config file (db + memory sections).
 	EnvConfigPath = "AGENT_RUNTIME_CONFIG"
 )
@@ -93,8 +101,9 @@ const (
 
 // Runtime defaults.
 const (
-	Version              = "0.1.0"
-	DefaultMaxIterations = 20
+	Version                    = "0.1.0"
+	DefaultMaxIterations       = 20
+	DefaultParallelToolWorkers = 8
 )
 
 // Environment variable names for skill/sandbox directory resolution.
@@ -149,12 +158,22 @@ const (
 	MaxSubAgentWaitTimeoutSec     = 300
 	DefaultParallelTaskTimeoutSec = 60
 	DefaultPoolTimeoutSec         = 300
+	DefaultResearchTimeoutSec     = 30
+	DefaultProviderTimeoutSec     = 10
+	DefaultCircuitOpenSec         = 120
 )
 
 // Miscellaneous runtime magic numbers.
 const (
-	DefaultSkillMaxIterations = 30
-	DefaultMaxReviewMemory    = 10
+	DefaultSkillMaxIterations  = 30
+	DefaultMaxReviewMemory     = 10
+	DefaultResearchMaxQueries  = 6
+	DefaultResearchMaxPages    = 8
+	DefaultResearchMaxRounds   = 3
+	DefaultResearchResults     = 5
+	DefaultProviderFailures    = 3
+	DefaultResearchCacheTTLMin = 60
+	DefaultNewsCacheTTLMin     = 5
 )
 
 // External service endpoints.
@@ -164,6 +183,11 @@ const (
 	DefaultRuntimePublicURL                      = "http://127.0.0.1:18081"
 	DefaultRuntimeClientInternalScheduledTaskURL = "http://127.0.0.1:8090/api/agent-runtime-client/v1/internal/scheduled-task"
 	DuckDuckGoHTMLSearchURL                      = "https://html.duckduckgo.com/html/?q=%s"
+	GitHubAPIBase                                = "https://api.github.com"
+	WikipediaEnglishBase                         = "https://en.wikipedia.org"
+	WikipediaChineseBase                         = "https://zh.wikipedia.org"
+	ArxivAPIURL                                  = "https://export.arxiv.org/api/query"
+	GDELTDocAPIURL                               = "https://api.gdeltproject.org/api/v2/doc/doc"
 )
 
 // Local model providers and lifecycle modes.

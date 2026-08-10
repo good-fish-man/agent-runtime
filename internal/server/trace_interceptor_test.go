@@ -66,6 +66,20 @@ func TestUnit_StreamTraceInterceptor_UsesIncomingMetadata(t *testing.T) {
 	}
 }
 
+func TestUnit_UnaryTraceInterceptor_PreservesSourceFramesAcrossGRPC(t *testing.T) {
+	interceptor := UnaryTraceInterceptor()
+	_, err := interceptor(context.Background(), nil, &grpc.UnaryServerInfo{FullMethod: "/test.Service/Run"}, func(context.Context, any) (any, error) {
+		cause := status.Error(codes.Unavailable, "provider unavailable")
+		return nil, log.GRPCError(cause, codes.Unavailable, "test.Service.Run.provider", "model failed")
+	})
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("status code = %s, want %s", status.Code(err), codes.Unavailable)
+	}
+	if !strings.Contains(err.Error(), "at test.Service.Run.provider") || !strings.Contains(err.Error(), "trace_interceptor_test.go:") {
+		t.Fatalf("transport error is missing source frames:\n%s", err)
+	}
+}
+
 type fakeServerStream struct {
 	grpc.ServerStream
 	ctx context.Context

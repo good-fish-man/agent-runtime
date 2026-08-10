@@ -6,6 +6,7 @@ import (
 	"github.com/good-fish-man/agent-runtime/internal/capability"
 	"github.com/good-fish-man/agent-runtime/internal/plugins"
 	"github.com/good-fish-man/agent-runtime/internal/retriever"
+	athenarouter "github.com/good-fish-man/agent-runtime/internal/router"
 	"github.com/good-fish-man/agent-runtime/internal/subagent"
 	"github.com/good-fish-man/agent-runtime/internal/tools"
 	"github.com/good-fish-man/agent-runtime/internal/types"
@@ -15,22 +16,18 @@ import (
 )
 
 // buildTools resolves selected capabilities into their internal providers.
-func (d *Dispatcher) buildTools(ctx context.Context, relevanceText string) ([]tool.BaseTool, []string) {
-	capabilityIDs := selectBuiltinCapabilities(relevanceText, len(d.req.Files) > 0)
+func (d *Dispatcher) buildTools(ctx context.Context, plan athenarouter.RoutePlan) ([]tool.BaseTool, []string) {
+	capabilityIDs := append([]string(nil), plan.Capabilities...)
 	if d.contextString("active_desktop_session") != "" && !containsToolName(capabilityIDs, capability.DesktopAction) {
 		capabilityIDs = append(capabilityIDs, capability.DesktopAction)
-	}
-	if d.contextString("active_browser_session") != "" {
-		for _, id := range []string{capability.BrowserNavigate, capability.BrowserRead, capability.BrowserObserve, capability.BrowserAction} {
-			if !containsToolName(capabilityIDs, id) {
-				capabilityIDs = append(capabilityIDs, id)
-			}
-		}
 	}
 	for _, configured := range d.req.Capabilities {
 		if configured.ID != "" && !containsToolName(capabilityIDs, configured.ID) {
 			capabilityIDs = append(capabilityIDs, configured.ID)
 		}
+	}
+	if len(plan.ExcludedCapabilities) > 0 {
+		capabilityIDs = withoutToolNames(capabilityIDs, plan.ExcludedCapabilities...)
 	}
 	if d.isBackgroundMonitor() {
 		capabilityIDs = readOnlyMonitorCapabilities(capabilityIDs)
@@ -40,7 +37,7 @@ func (d *Dispatcher) buildTools(ctx context.Context, relevanceText string) ([]to
 	}
 	if !d.contextBool("browser_controller") {
 		capabilityIDs = withoutToolNames(capabilityIDs,
-			capability.BrowserSearch, capability.BrowserOpen, capability.BrowserLogin, capability.BrowserRead,
+			capability.BrowserSearch, capability.BrowserTask, capability.BrowserOpen, capability.BrowserLogin, capability.BrowserRead,
 			capability.BrowserNavigate, capability.BrowserObserve, capability.BrowserAction, capability.BrowserClose,
 		)
 	}

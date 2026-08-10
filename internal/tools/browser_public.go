@@ -17,6 +17,7 @@ import (
 
 const (
 	BrowserSearchToolName   = "BrowserSearch"
+	BrowserTaskToolName     = "BrowserTask"
 	BrowserOpenToolName     = "BrowserOpen"
 	BrowserNavigateToolName = "BrowserNavigate"
 	BrowserObserveToolName  = "BrowserObserve"
@@ -35,6 +36,14 @@ type BrowserSearchInput struct {
 
 type BrowserOpenInput struct {
 	Target string `json:"target"`
+}
+
+type BrowserTaskInput struct {
+	SessionID            string `json:"session_id,omitempty"`
+	Goal                 string `json:"goal"`
+	Target               string `json:"target,omitempty"`
+	Query                string `json:"query,omitempty"`
+	ContextualMediaTitle bool   `json:"contextual_media_title,omitempty"`
 }
 
 type BrowserNavigateInput struct {
@@ -57,6 +66,7 @@ type BrowserActionInput struct {
 	SessionID string `json:"session_id"`
 	Action    string `json:"action"`
 	Ref       string `json:"ref,omitempty"`
+	TargetRef string `json:"target_ref,omitempty"`
 	Value     string `json:"value,omitempty"`
 }
 
@@ -73,12 +83,14 @@ type BrowserActionOutput struct {
 }
 
 type BrowserSearchTool struct{}
+type BrowserTaskTool struct{}
 type BrowserOpenTool struct{}
 type BrowserNavigateTool struct{}
 type BrowserObserveTool struct{}
 type BrowserActionTool struct{}
 
 func NewBrowserSearchTool() *BrowserSearchTool     { return &BrowserSearchTool{} }
+func NewBrowserTaskTool() *BrowserTaskTool         { return &BrowserTaskTool{} }
 func NewBrowserOpenTool() *BrowserOpenTool         { return &BrowserOpenTool{} }
 func NewBrowserNavigateTool() *BrowserNavigateTool { return &BrowserNavigateTool{} }
 func NewBrowserObserveTool() *BrowserObserveTool   { return &BrowserObserveTool{} }
@@ -89,6 +101,11 @@ func init() {
 		Name: BrowserSearchToolName, Desc: "Search the web in a real browser and return result links with an ongoing browser session.",
 		IsReadOnly: true, MaxResultChars: maxBrowserSnapshot, DefaultRisk: "low",
 		Creator: func(string) interface{} { return NewBrowserSearchTool() },
+	})
+	GlobalRegistry.Register(ToolMeta{
+		Name: BrowserTaskToolName, Desc: "Ask the local Browser System to execute a reversible browser task such as opening a site, searching within a site, or opening a matching result, then return structured observations.",
+		IsReadOnly: false, MaxResultChars: maxBrowserSnapshot, DefaultRisk: "medium",
+		Creator: func(string) interface{} { return NewBrowserTaskTool() },
 	})
 	GlobalRegistry.Register(ToolMeta{
 		Name: BrowserOpenToolName, Desc: "Open a website in the visible, controllable Athena browser, reusing the existing browser window and creating or switching tabs when needed.",
@@ -112,12 +129,71 @@ func init() {
 	})
 }
 
+func (t *BrowserTaskTool) Info(context.Context) (*schema.ToolInfo, error) {
+	return &schema.ToolInfo{
+		Name: BrowserTaskToolName,
+		Desc: "Execute a reversible user-visible browser task through Athena Browser System. Prefer this for commands like opening YouTube, searching inside the current site, opening the first suitable result, or continuing the current page. The Browser System owns tabs, DOM refs, retries, and Observation; do not use it for purchases, bookings, messages, account changes, credentials, or verification codes.",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"goal":       {Type: schema.String, Desc: "Natural-language browser task to complete", Required: true},
+			"session_id": {Type: schema.String, Desc: "Existing browser session ID when continuing a page", Required: false},
+			"target":     {Type: schema.String, Desc: "Optional site, URL, or service name", Required: false},
+			"query":      {Type: schema.String, Desc: "Optional search text for the site or page", Required: false},
+		}),
+	}, nil
+}
+
+func (t *BrowserTaskTool) ValidateInput(_ context.Context, input string) *ValidationResult {
+	var in BrowserTaskInput
+	if err := json.Unmarshal([]byte(input), &in); err != nil {
+		return &ValidationResult{Valid: false, Message: fmt.Sprintf("invalid JSON: %v", err), ErrorCode: 1}
+	}
+	goal := strings.TrimSpace(in.Goal)
+	if goal == "" {
+		return &ValidationResult{Valid: false, Message: "goal is required", ErrorCode: 2}
+	}
+	if len([]rune(goal)) > 1200 {
+		return &ValidationResult{Valid: false, Message: "goal is too long", ErrorCode: 3}
+	}
+	if strings.TrimSpace(in.SessionID) != "" {
+		if err := validateBrowserSessionID(in.SessionID); err != nil {
+			return &ValidationResult{Valid: false, Message: err.Error(), ErrorCode: 4}
+		}
+	}
+	if len([]rune(in.Target)) > 500 || len([]rune(in.Query)) > 500 {
+		return &ValidationResult{Valid: false, Message: "target/query is too long", ErrorCode: 5}
+	}
+	return &ValidationResult{Valid: true}
+}
+
+func (t *BrowserTaskTool) InvokableRun(ctx context.Context, input string, _ ...tool.Option) (string, error) {
+	var in BrowserTaskInput
+	if err := json.Unmarshal([]byte(input), &in); err != nil {
+		return "", fmt.Errorf("invalid input: %w", err)
+	}
+	if validation := t.ValidateInput(ctx, input); !validation.Valid {
+		return "", fmt.Errorf("invalid browser task: %s", validation.Message)
+	}
+	sessionID := strings.TrimSpace(in.SessionID)
+	if sessionID == "" {
+		var err error
+		sessionID, err = newBrowserSessionID()
+		if err != nil {
+			return "", fmt.Errorf("create browser task session: %w", err)
+		}
+	}
+	return browserClientRequest(ctx, sessionID, "task", map[string]any{
+		"goal": strings.TrimSpace(in.Goal), "target": strings.TrimSpace(in.Target), "query": strings.TrimSpace(in.Query),
+		"contextual_media_title": in.ContextualMediaTitle,
+		"headed":                 true, "snapshot": true,
+	}, actionprotocol.RiskMedium, actionprotocol.Allow, false, "Executing a reversible browser task on the user's device.")
+}
+
 func (t *BrowserOpenTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: BrowserOpenToolName,
-		Desc: "Open a website in the user's visible Athena browser. Reuses the current browser window and opens or switches a tab for the target. Pass an exact HTTP(S) URL when known; otherwise pass a website or service name and Athena opens search results. Returns a session_id and page snapshot for continued BrowserAction calls.",
+		Desc: "Open an exact HTTP(S) URL in the user's visible Athena browser. Reuses the current browser window and opens or switches a tab. Resolve website names through Search System or use BrowserTask before calling this capability.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"target": {Type: schema.String, Desc: "Exact HTTP(S) URL or website/service name", Required: true},
+			"target": {Type: schema.String, Desc: "Exact absolute HTTP(S) URL", Required: true},
 		}),
 	}, nil
 }
@@ -131,11 +207,9 @@ func (t *BrowserOpenTool) ValidateInput(_ context.Context, input string) *Valida
 	if target == "" {
 		return &ValidationResult{Valid: false, Message: "target is required", ErrorCode: 2}
 	}
-	if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") {
-		parsed, err := url.Parse(target)
-		if err != nil || parsed.Host == "" || parsed.User != nil {
-			return &ValidationResult{Valid: false, Message: "target URL must be an absolute HTTP(S) URL without credentials", ErrorCode: 3}
-		}
+	parsed, err := url.Parse(target)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
+		return &ValidationResult{Valid: false, Message: "target must be an exact absolute HTTP(S) URL without credentials; resolve names through Search System", ErrorCode: 3}
 	}
 	return &ValidationResult{Valid: true}
 }
@@ -149,16 +223,12 @@ func (t *BrowserOpenTool) InvokableRun(ctx context.Context, input string, _ ...t
 		return "", fmt.Errorf("invalid browser open request: %s", validation.Message)
 	}
 	target := strings.TrimSpace(in.Target)
-	destination := target
-	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
-		destination = publicSearchURL("google", target, 8)
-	}
 	sessionID, err := newBrowserSessionID()
 	if err != nil {
 		return "", fmt.Errorf("create browser session: %w", err)
 	}
 	return browserClientRequest(ctx, sessionID, "open", map[string]any{
-		"url": destination, "target": target, "headed": true, "snapshot": true,
+		"url": target, "target": target, "headed": true, "snapshot": true,
 	}, actionprotocol.RiskMedium, actionprotocol.Allow, false, "Opening a visible, controllable browser session on the user's device.")
 }
 
@@ -294,12 +364,13 @@ func (t *BrowserObserveTool) InvokableRun(ctx context.Context, input string, _ .
 func (t *BrowserActionTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: BrowserActionToolName,
-		Desc: "Control an existing browser session using refs from its latest snapshot. Supports click, type, press, scroll, wait, screenshot, and explicit user-requested download, then returns an updated observation. Never use it to submit purchases, bookings, messages, account changes, deletion, consent, credentials, or verification codes.",
+		Desc: "Control an existing browser session using refs from its latest snapshot. Supports click, play, pause, type, hover, select, drag, press, scroll, back, forward, refresh, wait, screenshot, and explicit user-requested download, then returns an updated observation. Play and pause require the device to verify the resulting media state. Never use this tool to submit purchases, bookings, messages, account changes, deletion, consent, credentials, or verification codes.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"session_id": {Type: schema.String, Desc: "Session returned by BrowserOpen, BrowserSearch, BrowserObserve, or BrowserLogin", Required: true},
-			"action":     {Type: schema.String, Desc: "click, type, press, scroll, wait, screenshot, or download", Required: true},
-			"ref":        {Type: schema.String, Desc: "Accessibility ref such as @e12; required for click/type/download", Required: false},
-			"value":      {Type: schema.String, Desc: "Text for type, allowed key for press, up/down for scroll, milliseconds for wait, or filename for download", Required: false},
+			"action":     {Type: schema.String, Desc: "click, play, pause, type, hover, select, drag, press, scroll, back, forward, refresh, wait, screenshot, or download", Required: true},
+			"ref":        {Type: schema.String, Desc: "Accessibility ref such as @e12; required for element interactions", Required: false},
+			"target_ref": {Type: schema.String, Desc: "Destination accessibility ref; required only for drag", Required: false},
+			"value":      {Type: schema.String, Desc: "Text for type/select, allowed key for press, direction for scroll, milliseconds for wait, or filename for download", Required: false},
 		}),
 	}, nil
 }
@@ -313,33 +384,40 @@ func (t *BrowserActionTool) ValidateInput(_ context.Context, input string) *Vali
 		return &ValidationResult{Valid: false, Message: err.Error(), ErrorCode: 2}
 	}
 	switch in.Action {
-	case "click", "download":
+	case "play", "pause":
+		// Playback is implemented and verified by the trusted client runtime;
+		// no model-provided JavaScript or selector is accepted.
+	case "click", "hover", "download":
 		if !browserRefPattern.MatchString(in.Ref) {
 			return &ValidationResult{Valid: false, Message: in.Action + " requires a snapshot ref such as @e12", ErrorCode: 3}
 		}
-	case "type":
+	case "type", "select":
 		if !browserRefPattern.MatchString(in.Ref) || strings.TrimSpace(in.Value) == "" {
-			return &ValidationResult{Valid: false, Message: "type requires a snapshot ref and non-empty value", ErrorCode: 4}
+			return &ValidationResult{Valid: false, Message: in.Action + " requires a snapshot ref and non-empty value", ErrorCode: 4}
 		}
 		if len([]rune(in.Value)) > 4000 {
-			return &ValidationResult{Valid: false, Message: "type value is too long", ErrorCode: 5}
+			return &ValidationResult{Valid: false, Message: in.Action + " value is too long", ErrorCode: 5}
+		}
+	case "drag":
+		if !browserRefPattern.MatchString(in.Ref) || !browserRefPattern.MatchString(in.TargetRef) || in.Ref == in.TargetRef {
+			return &ValidationResult{Valid: false, Message: "drag requires different source and target snapshot refs", ErrorCode: 10}
 		}
 	case "press":
 		if !allowedBrowserKey(in.Value) {
 			return &ValidationResult{Valid: false, Message: "press key is not allowed", ErrorCode: 6}
 		}
 	case "scroll":
-		if in.Value != "up" && in.Value != "down" {
-			return &ValidationResult{Valid: false, Message: "scroll value must be up or down", ErrorCode: 7}
+		if in.Value != "up" && in.Value != "down" && in.Value != "left" && in.Value != "right" {
+			return &ValidationResult{Valid: false, Message: "scroll value must be up, down, left, or right", ErrorCode: 7}
 		}
 	case "wait":
 		if _, err := strconv.Atoi(strings.TrimSpace(in.Value)); err != nil {
 			return &ValidationResult{Valid: false, Message: "wait value must be milliseconds", ErrorCode: 8}
 		}
-	case "screenshot":
+	case "screenshot", "back", "forward", "refresh":
 		// No extra input required.
 	default:
-		return &ValidationResult{Valid: false, Message: "action must be click, type, press, scroll, wait, screenshot, or download", ErrorCode: 9}
+		return &ValidationResult{Valid: false, Message: "unsupported browser action", ErrorCode: 9}
 	}
 	return &ValidationResult{Valid: true}
 }
@@ -353,10 +431,13 @@ func (t *BrowserActionTool) InvokableRun(ctx context.Context, input string, _ ..
 		return "", fmt.Errorf("invalid browser action: %s", validation.Message)
 	}
 	risk, decision := actionprotocol.RiskMedium, actionprotocol.Allow
-	if in.Action == "scroll" || in.Action == "wait" || in.Action == "screenshot" {
+	if in.Action == "play" || in.Action == "pause" || in.Action == "hover" || in.Action == "scroll" || in.Action == "back" || in.Action == "forward" || in.Action == "refresh" || in.Action == "wait" || in.Action == "screenshot" {
 		risk, decision = actionprotocol.RiskLow, actionprotocol.Allow
 	}
-	arguments := map[string]any{"ref": in.Ref, "value": in.Value, "snapshot": true}
+	if in.Action == "drag" {
+		risk, decision = actionprotocol.RiskMedium, actionprotocol.AskUser
+	}
+	arguments := map[string]any{"ref": in.Ref, "target_ref": in.TargetRef, "value": in.Value, "snapshot": true}
 	if in.Action == "download" && strings.TrimSpace(in.Value) != "" {
 		arguments["filename"] = strings.TrimSpace(in.Value)
 	}
