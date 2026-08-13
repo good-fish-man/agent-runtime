@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	runtimev1 "github.com/good-fish-man/agent-runtime/gen/agent/runtime/v1"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func TestToTypesRunRequestPreservesSubAgentConfig(t *testing.T) {
@@ -14,7 +15,7 @@ func TestToTypesRunRequestPreservesSubAgentConfig(t *testing.T) {
 		Id: "image-1", MimeType: "image/png", Data: []byte("image"), Sha256: "abc",
 	}}, SubAgents: []*runtimev1.SubAgentConfig{{
 		Id: "reviewer", Name: "Reviewer", MaxIterations: 6, TimeoutMs: 30000,
-		Model:        &runtimev1.ModelConfig{Name: "small-model"},
+		Model:        &runtimev1.ModelConfig{Name: "small-model", ExtraFields: &structpb.Struct{Fields: map[string]*structpb.Value{"model_id": structpb.NewStringValue("sub-model-1")}}},
 		Capabilities: []*runtimev1.CapabilityConfig{{Id: "filesystem.read"}},
 		Skills:       []*runtimev1.Skill{{Id: "audit", Name: "Audit"}},
 	}}}
@@ -38,5 +39,8 @@ func TestToTypesRunRequestPreservesSubAgentConfig(t *testing.T) {
 	}
 	if sub.Model == nil || sub.Model.Name != "small-model" || len(sub.Capabilities) != 1 || len(sub.Skills) != 1 {
 		t.Fatalf("sub-agent capabilities lost: %+v", sub)
+	}
+	if sub.Model.ExtraFields["model_id"] != "sub-model-1" {
+		t.Fatalf("sub-agent model identity lost: %+v", sub.Model.ExtraFields)
 	}
 }

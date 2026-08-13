@@ -18,6 +18,7 @@ const (
 	KindNews       Kind = "news"
 	KindTravel     Kind = "travel"
 	KindComparison Kind = "comparison"
+	KindProcedure  Kind = "procedure"
 	KindResearch   Kind = "research"
 )
 
@@ -30,12 +31,21 @@ type Plan struct {
 	MaxSources       int
 	Date             string
 	ResolvedRequest  string
+	ResearchGoal     string
+	Constraints      []string
 	ResponseLanguage string
 }
 
 var urlPattern = regexp.MustCompile(`https?://[^\s<>"']+`)
 
 var structuredAnswerLabelPattern = regexp.MustCompile(`(?i)(fetch\s+now\?|count|sources?|立即获取|现在获取|数量|来源)\s*[：:]`)
+
+var (
+	chineseCredentialConversionPattern = regexp.MustCompile(`(?:想|希望|需要|要)?把?\s*([^，。！？,;；\n]{1,32}?(?:驾照|驾驶证|许可证|执照|资格证))\s*(?:换成|换为|更换为|转换为|转为|转成)\s*([^，。！？,;；\n]{1,32}?(?:驾照|驾驶证|许可证|执照|资格证))`)
+	englishCredentialConversionPattern = regexp.MustCompile(`(?i)(?:convert|exchange)\s+(?:my\s+)?([^,.;!?]{1,48}?(?:driver'?s?\s+licen[cs]e|driving\s+licen[cs]e|permit))\s+(?:to|into|for)\s+([^,.;!?]{1,48}?(?:driver'?s?\s+licen[cs]e|driving\s+licen[cs]e|permit))`)
+	chineseIdentityPattern             = regexp.MustCompile(`(?:我是|本人是)([^，。！？,;；\s]{1,20})`)
+	chineseLocationPattern             = regexp.MustCompile(`(?:目前|现在)?在([^，。！？,;；\s]{1,20})(工作|居住|生活|留学)`)
+)
 
 var (
 	newsKeywords       = []string{"新闻", "资讯", "头条", "要闻", "news", "headlines", "current events"}
@@ -102,20 +112,7 @@ func Analyze(prompt string, requestContext map[string]any, now time.Time) Plan {
 		}
 	}
 	if containsAny(text, procedureKeywords) {
-		queries := uniqueQueries(text+" "+date, text+" 官方 申请条件 办理流程 所需材料")
-		if prefersEnglish(locale, text) {
-			queries = uniqueQueries(text+" "+date, text+" official requirements process required documents")
-		}
-		return Plan{
-			Kind:             KindResearch,
-			Queries:          queries,
-			SeedURLs:         urls,
-			MinSources:       3,
-			MaxSources:       5,
-			Date:             date,
-			ResolvedRequest:  text,
-			ResponseLanguage: responseLanguage,
-		}
+		return procedurePlan(date, locale, text, urls, responseLanguage)
 	}
 	if len(urls) > 0 || containsAny(text, researchKeywords) {
 		queries := uniqueQueries(text, text+" 官方来源")
@@ -134,6 +131,121 @@ func Analyze(prompt string, requestContext map[string]any, now time.Time) Plan {
 		}
 	}
 	return Plan{}
+}
+
+func procedurePlan(date, locale, text string, urls []string, responseLanguage string) Plan {
+	goal := procedureResearchGoal(text)
+	constraints := procedureConstraints(text, goal)
+	scope := strings.TrimSpace(strings.Join(append([]string{goal}, constraints...), " "))
+	if scope == "" {
+		scope = strings.TrimSpace(text)
+	}
+	year := date
+	if len(date) >= 4 {
+		year = date[:4]
+	}
+	queries := uniqueQueries(
+		scope+" "+year+" 官方 申请资格 主管机关",
+		scope+" 官方 所需材料 办理流程 预约 费用",
+		scope+" 官方 受理地点 审查 考试 地方差异 注意事项",
+	)
+	if containsDrivingLicence(goal) {
+		term := "外国免許切替"
+		queries = uniqueQueries(
+			scope+" "+term+" "+year+" 官方 申请资格 主管机关",
+			scope+" "+term+" 官方 所需材料 翻译 预约 费用",
+			scope+" "+term+" 官方 知识确认 技能确认 驾照中心 地方差异",
+		)
+	}
+	if prefersEnglish(locale, text) {
+		queries = uniqueQueries(
+			scope+" "+year+" official eligibility competent authority",
+			scope+" official required documents application process appointment fees",
+			scope+" official local office assessment tests exceptions",
+		)
+	}
+	return Plan{
+		Kind: KindProcedure, Queries: queries, SeedURLs: urls, MinSources: 3, MaxSources: 5, Date: date,
+		ResolvedRequest: text, ResearchGoal: goal, Constraints: constraints, ResponseLanguage: responseLanguage,
+	}
+}
+
+func procedureResearchGoal(text string) string {
+	text = strings.Join(strings.Fields(text), " ")
+	if match := chineseCredentialConversionPattern.FindStringSubmatch(text); len(match) == 3 {
+		return strings.TrimSpace(match[1]) + "换" + strings.TrimSpace(match[2])
+	}
+	if match := englishCredentialConversionPattern.FindStringSubmatch(text); len(match) == 3 {
+		return strings.TrimSpace(match[1]) + " to " + strings.TrimSpace(match[2])
+	}
+	clauses := strings.FieldsFunc(text, func(r rune) bool {
+		return strings.ContainsRune("，。！？,;；!?\n", r)
+	})
+	best, bestScore := "", -1
+	for _, clause := range clauses {
+		clause = strings.TrimSpace(clause)
+		score := 0
+		if containsAny(clause, procedureKeywords) {
+			score += 10
+		}
+		if containsAny(clause, []string{"换", "办理", "申请", "转换", "更换", "怎么做", "如何", "convert", "exchange", "apply", "process"}) {
+			score += 4
+		}
+		if score > bestScore || (score == bestScore && len([]rune(clause)) > len([]rune(best))) {
+			best, bestScore = clause, score
+		}
+	}
+	if best == "" {
+		best = text
+	}
+	for _, prefix := range []string{"请问", "请帮我", "帮我", "我想要", "我想", "想要", "想"} {
+		best = strings.TrimSpace(strings.TrimPrefix(best, prefix))
+	}
+	return truncateRunes(best, 100)
+}
+
+func procedureConstraints(text, goal string) []string {
+	constraints := make([]string, 0, 4)
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" || strings.EqualFold(value, goal) {
+			return
+		}
+		for _, existing := range constraints {
+			if strings.EqualFold(existing, value) {
+				return
+			}
+		}
+		constraints = append(constraints, value)
+	}
+	if match := chineseIdentityPattern.FindStringSubmatch(text); len(match) == 2 {
+		add("申请人 " + strings.TrimSpace(match[1]))
+	}
+	if match := chineseLocationPattern.FindStringSubmatch(text); len(match) == 3 {
+		add("当前在" + strings.TrimSpace(match[1]) + strings.TrimSpace(match[2]))
+	}
+	for _, clause := range strings.FieldsFunc(text, func(r rune) bool {
+		return strings.ContainsRune("，。！？,;；!?\n", r)
+	}) {
+		clause = strings.TrimSpace(clause)
+		if containsAny(clause, []string{"持有", "已有", "已经有", "currently hold", "already have"}) && !strings.Contains(goal, clause) {
+			add(clause)
+		}
+	}
+	return constraints
+}
+
+func containsDrivingLicence(value string) bool {
+	return containsAny(value, []string{"驾照", "驾驶证", "driver's license", "driver license", "driving license", "driving licence"})
+}
+
+func truncateRunes(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	runes := []rune(value)
+	if limit <= 0 || len(runes) <= limit {
+		return value
+	}
+	return strings.TrimSpace(string(runes[:limit]))
 }
 
 // AnalyzeConversation carries short user refinements such as "Tokyo" or

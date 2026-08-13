@@ -266,6 +266,15 @@ func nilContext() context.Context {
 	return context.Background()
 }
 
+func TestMergeResultAccumulatesModelUsageAcrossToolIterations(t *testing.T) {
+	total := &Result{Usage: Usage{PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120}}
+	mergeResult(total, &Result{Usage: Usage{PromptTokens: 180, CompletionTokens: 30, TotalTokens: 210}})
+
+	if total.Usage.PromptTokens != 280 || total.Usage.CompletionTokens != 50 || total.Usage.TotalTokens != 330 {
+		t.Fatalf("usage was not accumulated: %+v", total.Usage)
+	}
+}
+
 func TestExecuteToolCallsAppendsObservationMessages(t *testing.T) {
 	fakeTool := &fakeObservationTool{name: "internet_search", output: `{"results":[{"title":"Athena"}]}`}
 	calls := []schema.ToolCall{{

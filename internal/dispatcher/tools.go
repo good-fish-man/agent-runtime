@@ -228,7 +228,7 @@ func (d *Dispatcher) mapSubAgents(ctx context.Context, in []types.SubAgentConfig
 		if c.Model != nil {
 			modelConfig = &subagent.ModelConfig{
 				Provider: c.Model.Provider, Name: c.Model.Name, APIKey: c.Model.APIKey, APIBase: c.Model.APIBase,
-				Temperature: c.Model.Temperature, MaxTokens: c.Model.MaxTokens, TopP: c.Model.TopP,
+				Temperature: c.Model.Temperature, MaxTokens: c.Model.MaxTokens, TopP: c.Model.TopP, ExtraFields: c.Model.ExtraFields,
 			}
 		}
 		out = append(out, subagent.SubAgentConfig{

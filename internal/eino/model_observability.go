@@ -18,16 +18,18 @@ const modelStreamBuffer = 16
 
 type observedChatModel struct {
 	inner     model.ToolCallingChatModel
+	modelID   string
 	provider  string
 	name      string
 	toolNames []string
 }
 
-func newObservedChatModel(inner model.ToolCallingChatModel, provider, name string) model.ToolCallingChatModel {
+func newObservedChatModel(inner model.ToolCallingChatModel, identity ModelIdentity) model.ToolCallingChatModel {
 	return &observedChatModel{
 		inner:    inner,
-		provider: strings.TrimSpace(provider),
-		name:     strings.TrimSpace(name),
+		modelID:  strings.TrimSpace(identity.ModelID),
+		provider: strings.TrimSpace(identity.Provider),
+		name:     strings.TrimSpace(identity.Model),
 	}
 }
 
@@ -47,6 +49,7 @@ func (m *observedChatModel) Generate(ctx context.Context, input []*schema.Messag
 			err = log.NewError("eino.ChatModel.Generate", "panic: %v", recovered)
 			log.ErrorfCtx(ctx, "model call panic model=%s mode=generate error=%v\n%s", m.name, recovered, debug.Stack())
 		}
+		recordModelUsage(ctx, m.identity(), usageOf(message))
 		span.End(err, modelMessageFields(message)...)
 	}()
 
@@ -79,11 +82,13 @@ func (m *observedChatModel) Stream(ctx context.Context, input []*schema.Message,
 	source, err := m.inner.Stream(ctx, input, opts...)
 	if err != nil {
 		err = log.WrapError(err, "eino.ChatModel.Stream")
+		recordModelUsage(ctx, m.identity(), Usage{})
 		span.End(err)
 		return nil, err
 	}
 	if source == nil {
 		err = log.NewError("eino.ChatModel.Stream", "model returned a nil stream")
+		recordModelUsage(ctx, m.identity(), Usage{})
 		span.End(err)
 		return nil, err
 	}
@@ -103,10 +108,15 @@ func (m *observedChatModel) WithTools(toolInfos []*schema.ToolInfo) (model.ToolC
 	}
 	return &observedChatModel{
 		inner:     bound,
+		modelID:   m.modelID,
 		provider:  m.provider,
 		name:      m.name,
 		toolNames: toolInfoNames(toolInfos),
 	}, nil
+}
+
+func (m *observedChatModel) identity() ModelIdentity {
+	return ModelIdentity{ModelID: m.modelID, Provider: m.provider, Model: m.name}
 }
 
 func (m *observedChatModel) toolFields(opts ...model.Option) []any {
@@ -144,6 +154,7 @@ func (m *observedChatModel) forwardStream(
 			writer.Send(nil, err)
 			span.End(err, stats.fields()...)
 		}
+		recordModelUsage(ctx, m.identity(), stats.usage)
 		source.Close()
 		writer.Close()
 	}()

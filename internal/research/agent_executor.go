@@ -87,6 +87,8 @@ func (e *AgentExecutor) ExecuteWithOptions(ctx context.Context, plan Plan, optio
 	outcome, err := e.agent.RunWithOptions(ctx, decision.Task{
 		Kind:           string(plan.Kind),
 		Prompt:         plan.ResolvedRequest,
+		Goal:           plan.ResearchGoal,
+		Constraints:    append([]string(nil), plan.Constraints...),
 		InitialQueries: append([]string(nil), plan.Queries...),
 		SeedURLs:       append([]string(nil), plan.SeedURLs...),
 		MinSources:     plan.MinSources,

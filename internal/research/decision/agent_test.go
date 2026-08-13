@@ -98,3 +98,30 @@ func TestComparisonPlannerUsesCompactIndependentSourceQueries(t *testing.T) {
 		}
 	}
 }
+
+func TestProcedurePlannerPreservesOneGoalAcrossEveryQuery(t *testing.T) {
+	task := Task{
+		Kind: "procedure", Prompt: "我是中国人，在日本工作，想把中国驾照换成日本驾照，我应该怎么做",
+		Goal: "中国驾照换日本驾照", Constraints: []string{"申请人 中国人", "当前在日本工作"},
+		InitialQueries: []string{
+			"中国驾照换日本驾照 申请人 中国人 当前在日本工作 外国免許切替 2026 官方 申请资格 主管机关",
+			"中国驾照换日本驾照 申请人 中国人 当前在日本工作 外国免許切替 官方 所需材料 翻译 预约 费用",
+		},
+	}
+	intent := (DefaultIntentAnalyzer{}).Analyze(task)
+	plan := (DefaultQueryPlanner{}).Plan(task, intent, DefaultBudget())
+	if intent.Topic != "中国驾照换日本驾照 申请人 中国人 当前在日本工作" {
+		t.Fatalf("intent topic lost the central goal: %q", intent.Topic)
+	}
+	if len(plan.Queries) < 2 {
+		t.Fatalf("procedure plan is incomplete: %+v", plan.Queries)
+	}
+	for _, query := range plan.Queries {
+		if !strings.Contains(query.Text, "中国驾照换日本驾照") {
+			t.Fatalf("query became an independent paragraph topic: %q", query.Text)
+		}
+		if strings.Contains(query.Text, "架构") || strings.Contains(query.Text, "安全") {
+			t.Fatalf("query used the technical-research template: %q", query.Text)
+		}
+	}
+}

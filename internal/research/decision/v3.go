@@ -103,12 +103,12 @@ type RunOptions struct {
 	OnProgress           func(Progress) error
 }
 
-func mergeAdvisedQueries(plan Plan, advice PlanAdvice, budget Budget) Plan {
+func mergeAdvisedQueries(task Task, plan Plan, advice PlanAdvice, budget Budget) Plan {
 	for _, candidate := range advice.Queries {
 		if len(plan.Queries) >= budget.MaxQueries {
 			break
 		}
-		text := strings.TrimSpace(candidate.Text)
+		text := constrainAdvisedQuery(task, candidate.Text)
 		if text == "" || len([]rune(text)) > 240 || hasQueryText(plan.Queries, text) {
 			continue
 		}
@@ -131,6 +131,25 @@ func mergeAdvisedQueries(plan Plan, advice PlanAdvice, budget Budget) Plan {
 		})
 	}
 	return plan
+}
+
+func constrainAdvisedQuery(task Task, candidate string) string {
+	candidate = strings.TrimSpace(candidate)
+	if task.Kind != "procedure" || candidate == "" {
+		return candidate
+	}
+	scope := taskResearchScope(task)
+	if scope == "" {
+		return candidate
+	}
+	detail := candidate
+	for _, phrase := range append([]string{task.Goal}, task.Constraints...) {
+		phrase = strings.TrimSpace(phrase)
+		if phrase != "" {
+			detail = replaceFold(detail, phrase, " ")
+		}
+	}
+	return strings.Join(strings.Fields(scope+" "+detail), " ")
 }
 
 func validSourceKind(raw string) (searchsystem.SourceKind, bool) {

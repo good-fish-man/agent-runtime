@@ -117,13 +117,32 @@ func TestSemanticVerificationRejectsInventedReferences(t *testing.T) {
 
 func TestMergeAdvisedQueriesRejectsOversizedAndUnknownSources(t *testing.T) {
 	plan := Plan{Queries: []searchsystem.Query{{ID: "q-1", Text: "baseline"}}}
-	updated := mergeAdvisedQueries(plan, PlanAdvice{Queries: []AdvisedQuery{
+	updated := mergeAdvisedQueries(Task{}, plan, PlanAdvice{Queries: []AdvisedQuery{
 		{Text: "baseline", Source: "official"},
 		{Text: "valid query", Source: "github"},
 		{Text: "invalid query", Source: "custom"},
 	}}, Budget{MaxQueries: 2})
 	if len(updated.Queries) != 2 || updated.Queries[1].Text != "valid query" {
 		t.Fatalf("unexpected advised queries: %+v", updated.Queries)
+	}
+}
+
+func TestMergeAdvisedProcedureQueryCannotDropGoalOrConstraints(t *testing.T) {
+	task := Task{
+		Kind: "procedure", Goal: "中国驾照换日本驾照",
+		Constraints: []string{"申请人 中国人", "当前在日本工作"},
+	}
+	updated := mergeAdvisedQueries(task, Plan{}, PlanAdvice{Queries: []AdvisedQuery{{
+		Text: "外国免許切替 预约和考试", Source: "official", Priority: 90,
+	}}}, Budget{MaxQueries: 2})
+	if len(updated.Queries) != 1 {
+		t.Fatalf("advised procedure query was not accepted: %+v", updated.Queries)
+	}
+	query := updated.Queries[0].Text
+	for _, required := range []string{"中国驾照换日本驾照", "申请人 中国人", "当前在日本工作", "外国免許切替"} {
+		if !strings.Contains(query, required) {
+			t.Fatalf("advised query lost %q: %q", required, query)
+		}
 	}
 }
 

@@ -77,6 +77,25 @@ func TestRouteOfficialProcedureDoesNotUseActiveBrowser(t *testing.T) {
 	}
 }
 
+func TestRouteDetailedOfficialProcedureKeepsSingleResearchRoute(t *testing.T) {
+	plan := RouteIntent(intent.Parse(intent.Request{
+		Text:                 "我是中国人，在日本工作，想把中国驾照换成日本驾照，我应该怎么做",
+		ActiveBrowserSession: true,
+		PreviousUserMessages: []string{"Open YouTube and play a music video"},
+	}))
+	if plan.Primary != RouteResearch || plan.Reason != "external_knowledge_required" {
+		t.Fatalf("procedure did not keep one research route: %+v", plan)
+	}
+	if !plan.UsesCapability(capability.InternetSearch) || !plan.UsesCapability(capability.InternetFetch) {
+		t.Fatalf("procedure route lacks research capabilities: %+v", plan)
+	}
+	for _, unwanted := range append(allBrowserCapabilities(), capability.DesktopAction) {
+		if plan.UsesCapability(unwanted) {
+			t.Fatalf("procedure route exposed unrelated capability %s: %+v", unwanted, plan)
+		}
+	}
+}
+
 func TestRouteWorkspaceOperation(t *testing.T) {
 	plan := RouteIntent(intent.Parse(intent.Request{Text: "帮我修改 main.go 并运行测试"}))
 	if plan.Primary != RouteFile {

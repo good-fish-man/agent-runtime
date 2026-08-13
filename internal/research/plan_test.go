@@ -121,10 +121,43 @@ func TestAnalyzeOfficialProcedureUsesCurrentAuthoritativeResearch(t *testing.T) 
 		"locale":   "zh-CN",
 		"timezone": "Asia/Tokyo",
 	}, now)
-	if plan.Kind != KindResearch || plan.MinSources < 3 || plan.Date != "2026-08-10" {
+	if plan.Kind != KindProcedure || plan.MinSources < 3 || plan.Date != "2026-08-10" {
 		t.Fatalf("unexpected official procedure plan: %+v", plan)
 	}
-	if len(plan.Queries) < 2 || !strings.Contains(plan.Queries[0], plan.Date) || !strings.Contains(plan.Queries[1], "官方") {
-		t.Fatalf("official procedure queries are not date-bound and authority-focused: %+v", plan.Queries)
+	if plan.ResearchGoal != "中国驾照换日本驾照" {
+		t.Fatalf("research goal = %q, want one coherent licence-conversion goal", plan.ResearchGoal)
 	}
+	if !containsAll(plan.Constraints, "申请人 中国人", "当前在日本工作") {
+		t.Fatalf("user constraints were not preserved: %+v", plan.Constraints)
+	}
+	if len(plan.Queries) != 3 {
+		t.Fatalf("procedure query count = %d, want 3 focused evidence dimensions: %+v", len(plan.Queries), plan.Queries)
+	}
+	for _, query := range plan.Queries {
+		if !strings.Contains(query, "中国驾照换日本驾照") || !strings.Contains(query, "中国人") || !strings.Contains(query, "日本工作") {
+			t.Fatalf("query lost the central goal or constraints: %q", query)
+		}
+		if strings.Contains(query, "架构") || strings.Contains(query, "安全") {
+			t.Fatalf("procedure query drifted into a generic technical template: %q", query)
+		}
+	}
+	if !strings.Contains(plan.Queries[0], "2026") || !strings.Contains(plan.Queries[0], "官方") || !strings.Contains(plan.Queries[1], "所需材料") {
+		t.Fatalf("official procedure queries do not cover freshness, authority, and documents: %+v", plan.Queries)
+	}
+}
+
+func containsAll(values []string, expected ...string) bool {
+	for _, wanted := range expected {
+		found := false
+		for _, value := range values {
+			if value == wanted {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }

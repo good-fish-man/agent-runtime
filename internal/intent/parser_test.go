@@ -137,6 +137,23 @@ func TestParseInformationalRequestDoesNotInheritBrowserMediaContext(t *testing.T
 	}
 }
 
+func TestParseDetailedOfficialProcedureAsOneResearchIntent(t *testing.T) {
+	parsed := Parse(Request{
+		Text:                 "我是中国人，在日本工作，想把中国驾照换成日本驾照，我应该怎么做",
+		ActiveBrowserSession: true,
+		PreviousUserMessages: []string{"Open YouTube and play a music video"},
+	})
+	if parsed.Goal != "我是中国人，在日本工作，想把中国驾照换成日本驾照，我应该怎么做" {
+		t.Fatalf("the complete user goal was not preserved: %+v", parsed)
+	}
+	if !parsed.HasSignal(SignalWebAccess) || parsed.Mode != ModeResearch || !parsed.HasDomain(DomainResearch) {
+		t.Fatalf("official procedure was not routed to research: %+v", parsed)
+	}
+	if parsed.HasSignal(SignalDirectBrowserControl) || parsed.HasDomain(DomainBrowser) {
+		t.Fatalf("detailed procedure inherited an unrelated browser session: %+v", parsed)
+	}
+}
+
 func TestParseExplicitResearchSearchDoesNotReuseActiveBrowser(t *testing.T) {
 	parsed := Parse(Request{
 		Text:                 "搜索驾照换证流程",

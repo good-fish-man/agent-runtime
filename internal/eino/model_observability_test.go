@@ -42,8 +42,9 @@ func TestObservedChatModelGenerateLogsUsageAndPreservesCause(t *testing.T) {
 	defer log.SetOutput(nil)
 
 	cause := errors.New("provider rejected request")
-	observed := newObservedChatModel(&observableFakeModel{generateError: cause}, "openai", "gpt-test")
-	_, err := observed.Generate(context.Background(), []*schema.Message{schema.UserMessage("hello")})
+	ctx, collector := WithUsageCollector(context.Background())
+	observed := newObservedChatModel(&observableFakeModel{generateError: cause}, ModelIdentity{ModelID: "model-test", Provider: "openai", Model: "gpt-test"})
+	_, err := observed.Generate(ctx, []*schema.Message{schema.UserMessage("hello")})
 	if !errors.Is(err, cause) {
 		t.Fatalf("Generate error does not preserve provider cause: %v", err)
 	}
@@ -56,6 +57,10 @@ func TestObservedChatModelGenerateLogsUsageAndPreservesCause(t *testing.T) {
 		if !strings.Contains(logged, expected) {
 			t.Fatalf("model log missing %q:\n%s", expected, logged)
 		}
+	}
+	records := collector.Snapshot()
+	if len(records) != 1 || records[0].ModelID != "model-test" || records[0].RequestCount != 1 || records[0].TotalTokens != 0 {
+		t.Fatalf("failed model call was not recorded: %+v", records)
 	}
 }
 
@@ -74,8 +79,9 @@ func TestObservedChatModelStreamLogsFullLifecycle(t *testing.T) {
 			},
 		},
 	}
-	observed := newObservedChatModel(&observableFakeModel{stream: []*schema.Message{final}}, "openai", "gpt-test")
-	stream, err := observed.Stream(context.Background(), []*schema.Message{schema.UserMessage("hello")})
+	ctx, collector := WithUsageCollector(context.Background())
+	observed := newObservedChatModel(&observableFakeModel{stream: []*schema.Message{final}}, ModelIdentity{ModelID: "model-test", Provider: "openai", Model: "gpt-test"})
+	stream, err := observed.Stream(ctx, []*schema.Message{schema.UserMessage("hello")})
 	if err != nil {
 		t.Fatalf("Stream returned error: %v", err)
 	}
@@ -94,5 +100,9 @@ func TestObservedChatModelStreamLogsFullLifecycle(t *testing.T) {
 		if !strings.Contains(logged, expected) {
 			t.Fatalf("stream log missing %q:\n%s", expected, logged)
 		}
+	}
+	records := collector.Snapshot()
+	if len(records) != 1 || records[0].ModelID != "model-test" || records[0].PromptTokens != 7 || records[0].CompletionTokens != 3 || records[0].TotalTokens != 10 || records[0].RequestCount != 1 {
+		t.Fatalf("stream model usage was not recorded: %+v", records)
 	}
 }

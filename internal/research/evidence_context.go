@@ -68,8 +68,18 @@ func (e Evidence) ContextSection() string {
 	var out strings.Builder
 	fmt.Fprintf(&out, "# Research execution\n- Workflow: %s\n- Research date: %s\n- Required source target: %d\n", e.Plan.Kind, e.Plan.Date, e.Plan.MinSources)
 	fmt.Fprintf(&out, "- Resolved user request: %s\n- Required response language: %s\n", sanitizeLine(e.Plan.ResolvedRequest), e.Plan.ResponseLanguage)
+	if e.Plan.ResearchGoal != "" {
+		fmt.Fprintf(&out, "- Single research goal: %s\n", sanitizeLine(e.Plan.ResearchGoal))
+	}
+	if len(e.Plan.Constraints) > 0 {
+		fmt.Fprintf(&out, "- User constraints that apply to the whole goal: %s\n", strings.Join(e.Plan.Constraints, "; "))
+	}
 	if e.Plan.Kind == KindNews {
 		out.WriteString("- The requested news date is already resolved. Answer the news request now; do not ask for a day, time, or time of day, and do not reinterpret news as weather.\n")
+	}
+	if e.Plan.Kind == KindProcedure {
+		out.WriteString("- This is one administrative-procedure question. Treat nationality, residence/work location, current credential, and target credential as constraints on the same goal; never answer or research them as separate topics.\n")
+		out.WriteString("- Give a practical ordered answer covering eligibility, responsible authority, documents, appointments/fees, examinations or checks, local variations, and next actions supported by official sources.\n")
 	}
 	fmt.Fprintf(&out, "- Queries already attempted: %s\n", strings.Join(e.AttemptedQuery, " | "))
 	fmt.Fprintf(&out, "- Protocol metrics: research_rounds=%d tool_calls=%d search=%d fetch=%d cache_hits=%d elapsed_ms=%d limit_reached=%t\n",

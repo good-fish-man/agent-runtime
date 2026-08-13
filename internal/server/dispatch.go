@@ -143,7 +143,7 @@ func toTypesRunRequest(req *runtimev1.RunRequest) *types.RunRequest {
 		if m := sa.GetModel(); m != nil {
 			subModel = &types.ModelConfig{
 				Provider: m.GetProvider(), Name: m.GetName(), APIKey: m.GetApiKey(), APIBase: m.GetApiBase(),
-				Temperature: m.GetTemperature(), MaxTokens: int(m.GetMaxTokens()), TopP: m.GetTopP(),
+				Temperature: m.GetTemperature(), MaxTokens: int(m.GetMaxTokens()), TopP: m.GetTopP(), ExtraFields: protoExtraFields(m),
 			}
 		}
 		var subSkills []types.Skill

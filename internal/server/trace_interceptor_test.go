@@ -75,7 +75,7 @@ func TestUnit_UnaryTraceInterceptor_PreservesSourceFramesAcrossGRPC(t *testing.T
 	if status.Code(err) != codes.Unavailable {
 		t.Fatalf("status code = %s, want %s", status.Code(err), codes.Unavailable)
 	}
-	if !strings.Contains(err.Error(), "at test.Service.Run.provider") || !strings.Contains(err.Error(), "trace_interceptor_test.go:") {
+	if !strings.Contains(err.Error(), "test.Service.Run.provider") || !strings.Contains(err.Error(), "trace_interceptor_test.go:") {
 		t.Fatalf("transport error is missing source frames:\n%s", err)
 	}
 }

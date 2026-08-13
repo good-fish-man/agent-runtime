@@ -209,7 +209,7 @@ func NewClient(ctx context.Context, cfg ModelConfig) (*Client, error) {
 	if err != nil {
 		return nil, log.WrapError(err, "eino.NewClient.createChatModel")
 	}
-	return &Client{model: newObservedChatModel(cm, cfg.Provider, cfg.Name), name: cfg.Name}, nil
+	return &Client{model: newObservedChatModel(cm, modelIdentityFromConfig(cfg)), name: cfg.Name}, nil
 }
 
 // Name returns the model name.
@@ -406,7 +406,7 @@ func (c *Client) Generate(ctx context.Context, prompt string, msgs []ChatMessage
 		}
 		res.FinishReason = finishReasonOf(msg, res.FinishReason)
 		if u := usageOf(msg); u.TotalTokens > 0 || u.PromptTokens > 0 || u.CompletionTokens > 0 {
-			res.Usage = u
+			res.Usage = addUsage(res.Usage, u)
 		}
 	}
 	content, handled, err := executeTextToolMarkup(ctx, res.Content, p.ExtraTools)
@@ -452,7 +452,7 @@ func (c *Client) Stream(ctx context.Context, prompt string, msgs []ChatMessage, 
 		}
 		total.ActionCount += executed.ActionCount
 		if !zeroUsage(executed.Usage) {
-			total.Usage = executed.Usage
+			total.Usage = addUsage(total.Usage, executed.Usage)
 		}
 		if strings.TrimSpace(executed.Content) != "" {
 			total.Content += executed.Content
@@ -522,7 +522,7 @@ func (c *Client) streamMessages(ctx context.Context, messages []adk.Message, p R
 			if !isUserVisibleMessage(mv.Message) {
 				res.FinishReason = finishReasonOf(mv.Message, res.FinishReason)
 				if u := usageOf(mv.Message); u.TotalTokens > 0 || u.PromptTokens > 0 || u.CompletionTokens > 0 {
-					res.Usage = u
+					res.Usage = addUsage(res.Usage, u)
 				}
 				continue
 			}
@@ -588,7 +588,7 @@ func mergeResult(dst, src *Result) {
 	dst.Content += src.Content
 	dst.FinishReason = src.FinishReason
 	if !zeroUsage(src.Usage) {
-		dst.Usage = src.Usage
+		dst.Usage = addUsage(dst.Usage, src.Usage)
 	}
 	dst.ActionCount += src.ActionCount
 	dst.StreamStats.Events += src.StreamStats.Events
@@ -599,6 +599,14 @@ func mergeResult(dst, src *Result) {
 	dst.StreamStats.ReasoningChunks += src.StreamStats.ReasoningChunks
 	dst.StreamStats.UsageChunks += src.StreamStats.UsageChunks
 	dst.ToolCalls = append(dst.ToolCalls, src.ToolCalls...)
+}
+
+func addUsage(left, right Usage) Usage {
+	return Usage{
+		PromptTokens:     left.PromptTokens + right.PromptTokens,
+		CompletionTokens: left.CompletionTokens + right.CompletionTokens,
+		TotalTokens:      left.TotalTokens + right.TotalTokens,
+	}
 }
 
 func (c *Client) executeToolCalls(ctx context.Context, toolCalls []schema.ToolCall, p RunParams, onChunk func(StreamChunk) error) (*toolExecutionResult, error) {

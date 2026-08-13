@@ -17,6 +17,8 @@ import (
 type Task struct {
 	Kind           string
 	Prompt         string
+	Goal           string
+	Constraints    []string
 	InitialQueries []string
 	SeedURLs       []string
 	MinSources     int
@@ -217,7 +219,7 @@ func (a *Agent) RunWithOptions(ctx context.Context, task Task, budget Budget, op
 		if err != nil {
 			outcome.Failures = append(outcome.Failures, "model-assisted query planning failed; deterministic plan retained: "+err.Error())
 		} else {
-			plan = mergeAdvisedQueries(plan, advice, budget)
+			plan = mergeAdvisedQueries(task, plan, advice, budget)
 			outcome.Plan = plan
 		}
 	}
@@ -288,7 +290,7 @@ func (a *Agent) RunWithOptions(ctx context.Context, task Task, budget Budget, op
 			}
 			return outcome, err
 		}
-		report = a.evidence.Merge(evidence.Request{Task: task.Prompt, Kind: task.Kind, Date: task.Date, MinSources: task.MinSources}, report, roundResult, len(outcome.Attempted))
+		report = a.evidence.Merge(evidence.Request{Task: taskResearchScope(task), Kind: task.Kind, Date: task.Date, MinSources: task.MinSources}, report, roundResult, len(outcome.Attempted))
 		if err := emitProgress(options, Progress{
 			Stage: "ranking", Message: "Ranking and cross-checking evidence", Percent: minInt(progressPercent+15, 78),
 			Round: round, Queries: len(outcome.Attempted), QueryTexts: progressQueryTexts(outcome.Attempted),
@@ -383,7 +385,7 @@ func addAdvisorUsage(usage *Usage, value AdvisorUsage) {
 type DefaultIntentAnalyzer struct{}
 
 func (DefaultIntentAnalyzer) Analyze(task Task) Intent {
-	intent := Intent{Kind: task.Kind, Topic: strings.TrimSpace(task.Prompt), NeedsAuthority: true, PreferredSource: []searchsystem.SourceKind{searchsystem.SourceGeneral, searchsystem.SourceOfficial}}
+	intent := Intent{Kind: task.Kind, Topic: taskResearchScope(task), NeedsAuthority: true, PreferredSource: []searchsystem.SourceKind{searchsystem.SourceGeneral, searchsystem.SourceOfficial}}
 	switch task.Kind {
 	case "news":
 		intent.NeedsFreshness = true
@@ -408,6 +410,9 @@ func (DefaultIntentAnalyzer) Analyze(task Task) Intent {
 	case "travel":
 		intent.NeedsFreshness = true
 		intent.PreferredSource = []searchsystem.SourceKind{searchsystem.SourceOfficial, searchsystem.SourceGeneral}
+	case "procedure":
+		intent.NeedsFreshness = true
+		intent.PreferredSource = []searchsystem.SourceKind{searchsystem.SourceOfficial, searchsystem.SourceGeneral}
 	}
 	return intent
 }
@@ -423,11 +428,18 @@ func (DefaultQueryPlanner) Plan(task Task, intent Intent, budget Budget) Plan {
 		}
 		queries = append(queries, searchsystem.Query{ID: fmt.Sprintf("q-%d", len(queries)+1), Text: text, Purpose: purpose, Priority: priority, PreferredSource: []searchsystem.SourceKind{source}})
 	}
-	base := coreResearchTopic(task.Prompt)
+	base := strings.TrimSpace(task.Goal)
+	if base == "" && task.Kind != "procedure" {
+		base = coreResearchTopic(task.Prompt)
+	}
 	if base == "" {
 		base = compactResearchQuery(task.Prompt)
 	}
 	for i, query := range task.InitialQueries {
+		if task.Kind == "procedure" {
+			add(compactResearchQuery(query), "official_procedure", 100-i, searchsystem.SourceOfficial)
+			continue
+		}
 		source := classifySource(query, intent)
 		text := compactResearchQuery(query)
 		if task.Kind == "research" || task.Kind == "comparison" {
@@ -449,6 +461,10 @@ func (DefaultQueryPlanner) Plan(task Task, intent Intent, budget Budget) Plan {
 	case "travel":
 		add(base+" official tourism transport", "official_travel_info", 90, searchsystem.SourceOfficial)
 		add(base+" current prices opening hours", "current_constraints", 80, searchsystem.SourceGeneral)
+	case "procedure":
+		scope := taskResearchScope(task)
+		add(scope+" official eligibility required documents process", "official_requirements", 95, searchsystem.SourceOfficial)
+		add(scope+" local authority appointment assessment exceptions", "local_variations", 75, searchsystem.SourceGeneral)
 	default:
 		add(base+" official documentation", "primary_source", 90, searchsystem.SourceOfficial)
 		if containsSource(intent.PreferredSource, searchsystem.SourceGitHub) {
@@ -509,7 +525,7 @@ func (DefaultFollowUpPlanner) Next(task Task, plan Plan, gaps []Gap, attempted m
 			}
 		}
 	}
-	base := strings.TrimSpace(task.Prompt)
+	base := taskResearchScope(task)
 	for _, gap := range gaps {
 		query := searchsystem.Query{ID: "follow-" + gap.Code, Priority: gap.Priority}
 		switch gap.Code {
@@ -617,7 +633,7 @@ func classifySource(query string, intent Intent) searchsystem.SourceKind {
 	switch {
 	case containsAnyFold(lower, "independent review", "independent coverage", "independent analysis", "独立评测", "独立来源", "独立分析"):
 		return searchsystem.SourceGeneral
-	case containsAnyFold(lower, "official specification", "official documentation", "official source", "官方规格", "官方文档", "官方来源"):
+	case containsAnyFold(lower, "official specification", "official documentation", "official source", "official requirements", "官方", "政府", "主管机关"):
 		return searchsystem.SourceOfficial
 	case strings.Contains(lower, "paper") || strings.Contains(lower, "论文") || strings.Contains(lower, "arxiv"):
 		return searchsystem.SourceAcademic
@@ -628,6 +644,21 @@ func classifySource(query string, intent Intent) searchsystem.SourceKind {
 	default:
 		return searchsystem.SourceGeneral
 	}
+}
+
+func taskResearchScope(task Task) string {
+	goal := strings.TrimSpace(task.Goal)
+	if goal == "" {
+		goal = strings.TrimSpace(task.Prompt)
+	}
+	parts := []string{goal}
+	for _, constraint := range task.Constraints {
+		constraint = strings.TrimSpace(constraint)
+		if constraint != "" && !strings.Contains(goal, constraint) {
+			parts = append(parts, constraint)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 func isTechnicalResearch(value string) bool {

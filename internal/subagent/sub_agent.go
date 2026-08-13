@@ -48,13 +48,14 @@ const (
 
 // ModelConfig 模型配置
 type ModelConfig struct {
-	Provider    string  `json:"provider"`
-	Name        string  `json:"name"`
-	APIKey      string  `json:"api_key,omitempty"`
-	APIBase     string  `json:"api_base,omitempty"`
-	Temperature float64 `json:"temperature,omitempty"`
-	MaxTokens   int     `json:"max_tokens,omitempty"`
-	TopP        float64 `json:"top_p,omitempty"`
+	Provider    string         `json:"provider"`
+	Name        string         `json:"name"`
+	APIKey      string         `json:"api_key,omitempty"`
+	APIBase     string         `json:"api_base,omitempty"`
+	Temperature float64        `json:"temperature,omitempty"`
+	MaxTokens   int            `json:"max_tokens,omitempty"`
+	TopP        float64        `json:"top_p,omitempty"`
+	ExtraFields map[string]any `json:"extra_fields,omitempty"`
 }
 
 // SubAgentConfig Sub-Agent 配置
@@ -107,7 +108,7 @@ func newSubAgent(ctx context.Context, cfg *SubAgentConfig, defaultModel model.To
 	if cfg.Model != nil && cfg.Model.Name != "" {
 		client, err := runtimeeino.NewClient(ctx, runtimeeino.ModelConfig{
 			Provider: cfg.Model.Provider, Name: cfg.Model.Name, APIKey: cfg.Model.APIKey, APIBase: cfg.Model.APIBase,
-			Temperature: cfg.Model.Temperature, MaxTokens: cfg.Model.MaxTokens, TopP: cfg.Model.TopP,
+			Temperature: cfg.Model.Temperature, MaxTokens: cfg.Model.MaxTokens, TopP: cfg.Model.TopP, ExtraFields: cfg.Model.ExtraFields,
 		})
 		if err != nil {
 			return nil, err

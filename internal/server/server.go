@@ -251,6 +251,7 @@ func memoryKindToProto(kind string) runtimev1.MemoryType {
 func (s *Server) Run(ctx context.Context, req *runtimev1.RunRequest) (*runtimev1.RunResponse, error) {
 	ctx, traceID, release := s.bindTrace(ctx, req.GetTraceId())
 	defer release()
+	ctx, usageCollector := eino.WithUsageCollector(ctx)
 	log.Infow("run", "prompt_len", len(req.GetPrompt()), "messages", len(req.GetMessages()), "stream", false)
 	mc, err := s.modelConfig(req.GetModels())
 	if err != nil {
@@ -268,19 +269,14 @@ func (s *Server) Run(ctx context.Context, req *runtimev1.RunRequest) (*runtimev1
 		return nil, log.GRPCError(err, codes.Unavailable, "Server.Run.Dispatch", "model call failed")
 	}
 	s.reviewMemories(mc, sessionID, userID, agentID, req.GetPrompt(), res.Content)
+	responseMetadata := buildResponseMetadata(client.Name(), time.Since(start).Milliseconds(), res.Usage, usageCollector)
 	return &runtimev1.RunResponse{
 		Content:      res.Content,
 		FinishReason: res.FinishReason,
-		TokensUsed:   int32(res.Usage.TotalTokens),
+		TokensUsed:   responseMetadata.TokensUsed,
 		TraceId:      traceID,
 		Memories:     s.currentMemories(ctx, sessionID),
-		Metadata: &runtimev1.ResponseMetadata{
-			Model:            client.Name(),
-			LatencyMs:        time.Since(start).Milliseconds(),
-			TokensUsed:       int32(res.Usage.TotalTokens),
-			PromptTokens:     int32(res.Usage.PromptTokens),
-			CompletionTokens: int32(res.Usage.CompletionTokens),
-		},
+		Metadata:     responseMetadata,
 	}, nil
 }
 
@@ -288,6 +284,7 @@ func (s *Server) Run(ctx context.Context, req *runtimev1.RunRequest) (*runtimev1
 func (s *Server) RunAgent(ctx context.Context, req *runtimev1.AgentRequest) (*runtimev1.AgentResponse, error) {
 	ctx, traceID, release := s.bindTrace(ctx, req.GetTraceId())
 	defer release()
+	ctx, usageCollector := eino.WithUsageCollector(ctx)
 	log.Infow("agent", "task_len", len(req.GetTask()), "stream", false)
 	if req.GetTask() == "" {
 		return nil, status.Error(codes.InvalidArgument, "task is required")
@@ -308,18 +305,13 @@ func (s *Server) RunAgent(ctx context.Context, req *runtimev1.AgentRequest) (*ru
 		return nil, log.GRPCError(err, codes.Unavailable, "Server.RunAgent.Dispatch", "model call failed")
 	}
 	s.reviewMemories(mc, sessionID, userID, agentID, req.GetTask(), res.Content)
+	responseMetadata := buildResponseMetadata(client.Name(), time.Since(start).Milliseconds(), res.Usage, usageCollector)
 	return &runtimev1.AgentResponse{
 		Content:      res.Content,
 		FinishReason: res.FinishReason,
-		TokensUsed:   int32(res.Usage.TotalTokens),
+		TokensUsed:   responseMetadata.TokensUsed,
 		TraceId:      traceID,
-		Metadata: &runtimev1.ResponseMetadata{
-			Model:            client.Name(),
-			LatencyMs:        time.Since(start).Milliseconds(),
-			TokensUsed:       int32(res.Usage.TotalTokens),
-			PromptTokens:     int32(res.Usage.PromptTokens),
-			CompletionTokens: int32(res.Usage.CompletionTokens),
-		},
+		Metadata:     responseMetadata,
 	}, nil
 }
 
@@ -505,21 +497,16 @@ func (s *Server) streamCompletion(
 		return log.GRPCError(err, codes.Unavailable, "Server.streamCompletion.Dispatch", "model stream failed")
 	}
 
+	responseMetadata := buildResponseMetadata(client.Name(), time.Since(start).Milliseconds(), res.Usage, eino.UsageCollectorFromContext(runCtx))
 	err = emit(&runtimev1.StreamEvent{
 		Payload: &runtimev1.StreamEvent_Done{Done: &runtimev1.DoneEvent{
 			Content:          res.Content,
 			FinishReason:     res.FinishReason,
 			FinishedAt:       timestamppb.Now(),
-			PromptTokens:     int32(res.Usage.PromptTokens),
-			CompletionTokens: int32(res.Usage.CompletionTokens),
-			TotalTokens:      int32(res.Usage.TotalTokens),
-			Metadata: &runtimev1.ResponseMetadata{
-				Model:            client.Name(),
-				LatencyMs:        time.Since(start).Milliseconds(),
-				TokensUsed:       int32(res.Usage.TotalTokens),
-				PromptTokens:     int32(res.Usage.PromptTokens),
-				CompletionTokens: int32(res.Usage.CompletionTokens),
-			},
+			PromptTokens:     responseMetadata.PromptTokens,
+			CompletionTokens: responseMetadata.CompletionTokens,
+			TotalTokens:      responseMetadata.TokensUsed,
+			Metadata:         responseMetadata,
 		}},
 	})
 	s.reviewMemories(mc, scope.sessionID, scope.userID, scope.agentID, scope.userInput, res.Content)
@@ -569,6 +556,7 @@ func (s *Server) RunStream(req *runtimev1.RunRequest, stream runtimev1.AgentRunt
 	ctx := stream.Context()
 	ctx, traceID, release := s.bindTrace(ctx, req.GetTraceId())
 	defer release()
+	ctx, _ = eino.WithUsageCollector(ctx)
 	log.Infow("run_stream", "prompt_len", len(req.GetPrompt()), "messages", len(req.GetMessages()))
 	mc, err := s.modelConfig(req.GetModels())
 	if err != nil {
@@ -589,6 +577,7 @@ func (s *Server) RunAgentStream(req *runtimev1.AgentRequest, stream runtimev1.Ag
 	ctx := stream.Context()
 	ctx, traceID, release := s.bindTrace(ctx, req.GetTraceId())
 	defer release()
+	ctx, _ = eino.WithUsageCollector(ctx)
 	log.Infow("agent_stream", "task_len", len(req.GetTask()))
 	if req.GetTask() == "" {
 		return status.Error(codes.InvalidArgument, "task is required")
@@ -605,6 +594,29 @@ func (s *Server) RunAgentStream(req *runtimev1.AgentRequest, stream runtimev1.Ag
 	disp := s.newAgentDispatcher(client, req, instruction)
 	return log.WrapError(s.streamCompletion(ctx, traceID, req.GetTask(), nil, mc, client, disp,
 		memScope{sessionID: sessionID, userID: userID, agentID: agentID, userInput: req.GetTask()}, stream.Send), "Server.RunAgentStream")
+}
+
+func buildResponseMetadata(modelName string, latencyMS int64, fallback eino.Usage, collector *eino.UsageCollector) *runtimev1.ResponseMetadata {
+	usage := fallback
+	var modelUsage []*runtimev1.ModelUsageMetadata
+	if collector != nil {
+		records := collector.Snapshot()
+		if len(records) > 0 {
+			usage = collector.Total()
+			modelUsage = make([]*runtimev1.ModelUsageMetadata, 0, len(records))
+			for _, record := range records {
+				modelUsage = append(modelUsage, &runtimev1.ModelUsageMetadata{
+					ModelId: record.ModelID, Provider: record.Provider, Model: record.Model,
+					PromptTokens: int32(record.PromptTokens), CompletionTokens: int32(record.CompletionTokens),
+					TotalTokens: int32(record.TotalTokens), RequestCount: int32(record.RequestCount),
+				})
+			}
+		}
+	}
+	return &runtimev1.ResponseMetadata{
+		Model: modelName, LatencyMs: latencyMS, TokensUsed: int32(usage.TotalTokens),
+		PromptTokens: int32(usage.PromptTokens), CompletionTokens: int32(usage.CompletionTokens), ModelUsage: modelUsage,
+	}
 }
 
 // Resume is not yet implemented (approval/checkpoint engine pending).

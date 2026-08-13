@@ -424,6 +424,7 @@ message ResponseMetadata {
   int32 iterations = 9;
   repeated ToolCallMetadata tool_calls_detail = 10;
   string error = 11;
+  repeated ModelUsageMetadata model_usage = 12;
 }
 
 message ToolCallMetadata {
@@ -537,4 +538,14 @@ message VisualInput {
   string sha256 = 4;
   string purpose = 5;
   string detail = 6;
+}
+
+message ModelUsageMetadata {
+  string model_id = 1;
+  string provider = 2;
+  string model = 3;
+  int32 prompt_tokens = 4;
+  int32 completion_tokens = 5;
+  int32 total_tokens = 6;
+  int32 request_count = 7;
 }
