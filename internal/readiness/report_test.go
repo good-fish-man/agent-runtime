@@ -30,3 +30,12 @@ func TestBuildFailsUnsafePluginAndMemoryConfiguration(t *testing.T) {
 		t.Fatalf("status = %s, want FAIL", report.Status)
 	}
 }
+
+func TestBuildFailsWhenRuntimeVersionDoesNotMatchFrozenGA(t *testing.T) {
+	report := Build(operations.NewGate(operations.Config{}, "runtime-1"), Config{
+		Version: "0.9.0", InstanceID: "runtime-1",
+	})
+	if report.Status != ga.StatusFail {
+		t.Fatalf("status = %s, want FAIL", report.Status)
+	}
+}

@@ -24,6 +24,12 @@ are abstract capabilities; the model does not call OS APIs directly.
 typed execution, frontend-independent processing, bounded admission, signed
 Provider configuration, and durable storage when memory is enabled.
 
+The compiled Runtime version must exactly match the frozen GA release version;
+a binary labeled `0.9.x` cannot report v1 readiness merely because it can
+decode part of the protocol. Runtime readiness proves Runtime-owned invariants
+only. The control plane's `golden.suite` gate still requires all ten real E2E
+journeys and their catalog evidence.
+
 HTTP `200` means all Runtime-owned invariants pass. HTTP `503` means at least
 one required Runtime invariant failed. Package signing, a connected device,
 installer validation, and soak tests belong to other release gates.
@@ -49,6 +55,8 @@ Secrets must not be added to span fields or persisted run manifests.
 - Generated files and local admin endpoints must remain behind trusted local or
   authenticated infrastructure.
 - Runtime does not return model API keys to the browser.
+- Search pages, fetched documents, and Provider output are normalized into the
+  frozen `athena.untrusted-content.v1` data-only envelope before model use.
 
 ## Troubleshooting
 

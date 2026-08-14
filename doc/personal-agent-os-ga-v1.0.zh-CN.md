@@ -18,6 +18,8 @@ Runtime 提供有限队列、请求 Deadline、优雅排空、严格 Provider �
 
 `GET /readiness` 返回 `athena.ga.v1` 报告，检查冻结协议、类型化执行、脱离前端的后台运行、有界准入、签名 Provider 配置，以及启用记忆时的持久数据库。
 
+编译进 Runtime 的版本必须与冻结 GA Release 完全一致；`0.9.x` 二进制不能仅因为可以解析部分协议就报告 v1 就绪。Runtime Readiness 只证明 Runtime 自身不变量；控制面的 `golden.suite` 仍要求十条真实 E2E 旅程及目录证据全部通过。
+
 HTTP `200` 表示 Runtime 自身不变量通过；HTTP `503` 表示至少一个必需条件失败。安装包签名、真实设备、安装器与长时间压测属于其他发布门禁。
 
 ## 运维接口
@@ -37,6 +39,7 @@ HTTP `200` 表示 Runtime 自身不变量通过；HTTP `503` 表示至少一个�
 - 记忆可以关闭；GA 环境启用时必须配置 PostgreSQL，并通过 Runtime Client 提供用户级保留与删除控制。
 - 生成文件和本机管理接口只能放在可信本机或认证后的基础设施后面。
 - Runtime 不向浏览器返回模型 API Key。
+- 搜索页面、抓取文档和 Provider 输出在进入模型前必须转换为冻结的 `athena.untrusted-content.v1` 纯数据信封。
 
 ## 排障
 

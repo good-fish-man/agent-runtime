@@ -23,11 +23,16 @@ type Config struct {
 }
 
 func Build(gate *operations.Gate, cfg Config) ga.ReadinessReport {
-	checks := []ga.ReadinessCheck{
-		pass("protocol.freeze", "compatibility", "Athena GA v1 contracts are pinned by the protocol repository"),
+	checks := make([]ga.ReadinessCheck, 0, 8)
+	if cfg.Version != ga.ReleaseVersion {
+		checks = append(checks, fail("protocol.freeze", "compatibility", "runtime version does not match the frozen GA release"))
+	} else {
+		checks = append(checks, pass("protocol.freeze", "compatibility", "compiled runtime and GA protocol versions match the frozen release"))
+	}
+	checks = append(checks,
 		pass("execution.typed", "traceability", "execution uses typed capability, action, and observation contracts"),
 		pass("frontend.independent", "durability", "runtime execution and background services do not require the frontend process"),
-	}
+	)
 	if gate == nil {
 		checks = append(checks, fail("admission.control", "reliability", "runtime admission gate is unavailable"))
 	} else {
