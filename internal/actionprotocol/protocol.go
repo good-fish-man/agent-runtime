@@ -2,45 +2,29 @@ package actionprotocol
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"sync/atomic"
 	"time"
-)
 
-const Protocol = "athena.agent.v3"
+	protocolv4 "github.com/good-fish-man/athena-protocol/protocol/v4"
+)
 
 const (
-	TypeAction = "ACTION"
-	RiskLow    = "LOW"
-	RiskMedium = "MEDIUM"
-	RiskHigh   = "HIGH"
-	Allow      = "ALLOW"
-	AskUser    = "ASK_USER"
-	Block      = "BLOCK"
+	Protocol   = protocolv4.Protocol
+	TypeAction = protocolv4.TypeAction
+	RiskLow    = protocolv4.RiskLow
+	RiskMedium = protocolv4.RiskMedium
+	RiskHigh   = protocolv4.RiskHigh
+	Allow      = protocolv4.Allow
+	AskUser    = protocolv4.AskUser
+	Block      = protocolv4.Block
 )
 
-type Policy struct {
-	Risk     string `json:"risk"`
-	Decision string `json:"decision"`
-}
-
-type Action struct {
-	Protocol       string         `json:"protocol"`
-	Type           string         `json:"type"`
-	TaskID         string         `json:"task_id"`
-	ActionID       string         `json:"action_id"`
-	SessionID      string         `json:"session_id,omitempty"`
-	Sequence       int64          `json:"sequence"`
-	IdempotencyKey string         `json:"idempotency_key"`
-	Deadline       time.Time      `json:"deadline"`
-	Capability     string         `json:"capability"`
-	Arguments      map[string]any `json:"arguments,omitempty"`
-	Policy         Policy         `json:"policy"`
-}
+type Policy = protocolv4.Policy
+type Action = protocolv4.Action
+type ExpectedObservation = protocolv4.ExpectedObservation
 
 type scope struct {
 	taskID   string
@@ -52,7 +36,7 @@ type scopeKey struct{}
 func WithScope(ctx context.Context, taskID string) context.Context {
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
-		taskID = "task-" + randomHex(12)
+		taskID = protocolv4.NewID("task")
 	}
 	return context.WithValue(ctx, scopeKey{}, &scope{taskID: taskID})
 }
@@ -60,18 +44,26 @@ func WithScope(ctx context.Context, taskID string) context.Context {
 func New(ctx context.Context, capability, sessionID string, arguments map[string]any, risk, decision string) Action {
 	current, _ := ctx.Value(scopeKey{}).(*scope)
 	if current == nil {
-		current = &scope{taskID: "task-" + randomHex(12)}
+		current = &scope{taskID: protocolv4.NewID("task")}
 	}
-	actionID := "action-" + randomHex(12)
 	sequence := current.sequence.Add(1)
+	actionID := protocolv4.NewID("action")
+	stepID := protocolv4.NewID("step")
 	if arguments == nil {
 		arguments = map[string]any{}
 	}
+	now := time.Now().UTC()
+	operation := capability
+	if separator := strings.LastIndex(capability, "."); separator >= 0 && separator+1 < len(capability) {
+		operation = capability[separator+1:]
+	}
 	return Action{
-		Protocol: Protocol, Type: TypeAction, TaskID: current.taskID, ActionID: actionID,
-		SessionID: sessionID, Sequence: sequence, IdempotencyKey: current.taskID + ":" + actionID,
-		Deadline: time.Now().UTC().Add(2 * time.Minute), Capability: capability, Arguments: arguments,
-		Policy: Policy{Risk: risk, Decision: decision},
+		Protocol: Protocol, Type: TypeAction, TaskID: current.taskID, StepID: stepID, ActionID: actionID,
+		SessionID: sessionID, Sequence: sequence, Revision: 1,
+		IdempotencyKey: current.taskID + ":" + stepID + ":" + actionID,
+		IssuedAt:       now, Deadline: now.Add(2 * time.Minute), Capability: capability, Operation: operation,
+		Arguments: arguments, Policy: Policy{Risk: risk, Decision: decision},
+		ExpectedObservation: ExpectedObservation{Kind: capability, TimeoutMS: int64((2 * time.Minute) / time.Millisecond)},
 	}
 }
 
@@ -92,28 +84,4 @@ func Parse(content string) (Action, bool) {
 		return Action{}, false
 	}
 	return action, true
-}
-
-func (a Action) Validate() error {
-	if a.Protocol != Protocol || a.Type != TypeAction {
-		return fmt.Errorf("invalid action protocol or type")
-	}
-	if a.TaskID == "" || a.ActionID == "" || a.IdempotencyKey == "" || a.Capability == "" || a.Sequence <= 0 || a.Deadline.IsZero() {
-		return fmt.Errorf("task_id, action_id, positive sequence, idempotency_key, deadline, and capability are required")
-	}
-	if a.Policy.Risk != RiskLow && a.Policy.Risk != RiskMedium && a.Policy.Risk != RiskHigh {
-		return fmt.Errorf("unsupported risk %q", a.Policy.Risk)
-	}
-	if a.Policy.Decision != Allow && a.Policy.Decision != AskUser && a.Policy.Decision != Block {
-		return fmt.Errorf("unsupported policy decision %q", a.Policy.Decision)
-	}
-	return nil
-}
-
-func randomHex(size int) string {
-	value := make([]byte, size)
-	if _, err := rand.Read(value); err != nil {
-		return strings.Repeat("0", size*2)
-	}
-	return hex.EncodeToString(value)
 }

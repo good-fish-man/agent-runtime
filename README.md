@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-Architecture: [Athena Agent Architecture v2](doc/architecture-v2.md) | [Research Agent v3](doc/research-agent-v3.md) | [Research Agent v2](doc/research-agent-v2.md) | [Personal AI Operating System Specification v1.0](doc/personal-ai-os-spec-v1.md)
+Architecture: [Agent OS versioned delivery plan v0.2-v1.0](doc/athena-agent-os-version-roadmap-v0.2-v1.0.md) | [Agent OS v0.2 detailed architecture](doc/agent-os-architecture-plan-v0.2.md) | [v0.2 compatibility matrix](doc/v0.2-compatibility-matrix.md) | [v0.2 release readiness](doc/v0.2-release-readiness.md) | [Athena Agent Architecture v2](doc/architecture-v2.md) | [Research Agent v3](doc/research-agent-v3.md) | [Research Agent v2](doc/research-agent-v2.md) | [Personal AI Operating System Specification v1.0](doc/personal-ai-os-spec-v1.md)
 
 Browser usage: [Common Browser Commands](https://github.com/good-fish-man/athena-launcher/blob/main/docs/browser-command-guide.md)
 

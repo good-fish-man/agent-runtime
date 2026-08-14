@@ -5,7 +5,8 @@ go 1.25.0
 require (
 	github.com/cloudwego/eino v0.8.6
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.11
-	github.com/good-fish-man/logx v0.1.5
+	github.com/good-fish-man/athena-protocol v0.2.0
+	github.com/good-fish-man/logx v0.2.0
 	github.com/oklog/ulid/v2 v2.1.1
 	golang.org/x/net v0.54.0
 	google.golang.org/grpc v1.82.1

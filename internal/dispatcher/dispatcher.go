@@ -235,6 +235,7 @@ func (d *Dispatcher) nonStreamingRunParams(ctx context.Context, instruction stri
 
 func (d *Dispatcher) prepareCapabilities(ctx context.Context, userPrompt string, msgs []eino.ChatMessage) {
 	text := capabilityText(userPrompt, msgs)
+	intentSpan := log.StartSpan(ctx, "intent.parse", "message_count", len(msgs), "has_files", len(d.req.Files) > 0)
 	parsedIntent := intent.Parse(intent.Request{
 		Text:                 userPrompt,
 		HasFiles:             len(d.req.Files) > 0,
@@ -242,7 +243,17 @@ func (d *Dispatcher) prepareCapabilities(ctx context.Context, userPrompt string,
 		ActiveDesktopSession: d.contextString("active_desktop_session") != "",
 		PreviousUserMessages: d.previousUserMessages(msgs),
 	})
+	intentSpan.End(nil,
+		"intent_mode", parsedIntent.Mode,
+		"confidence", parsedIntent.Confidence,
+	)
+	routeSpan := log.StartSpan(ctx, "route.plan", "intent_mode", parsedIntent.Mode)
 	d.routePlan = athenarouter.RouteIntent(parsedIntent)
+	routeSpan.End(nil,
+		"primary", d.routePlan.Primary,
+		"fallback_count", len(d.routePlan.Fallbacks),
+		"capability_count", len(d.routePlan.Capabilities),
+	)
 	d.req.Skills = selectRelevantSkills(d.availableSkills, text, 3)
 	// Browser control is implemented by the Action/Observation protocol. Do not
 	// expose the legacy agent-browser skill in the same run: its standalone CLI
@@ -331,6 +342,7 @@ func (d *Dispatcher) prepareResearch(ctx context.Context, userPrompt string) err
 	}
 	routePlan := d.routePlan
 	if routePlan.Primary == "" {
+		intentSpan := log.StartSpan(ctx, "intent.parse", "phase", "research_fallback")
 		parsed := intent.Parse(intent.Request{
 			Text:                 userPrompt,
 			HasFiles:             len(d.req.Files) > 0,
@@ -338,7 +350,14 @@ func (d *Dispatcher) prepareResearch(ctx context.Context, userPrompt string) err
 			ActiveDesktopSession: d.contextString("active_desktop_session") != "",
 			PreviousUserMessages: d.previousUserMessages(nil),
 		})
+		intentSpan.End(nil, "intent_mode", parsed.Mode, "confidence", parsed.Confidence)
+		routeSpan := log.StartSpan(ctx, "route.plan", "phase", "research_fallback", "intent_mode", parsed.Mode)
 		routePlan = athenarouter.RouteIntent(parsed)
+		routeSpan.End(nil,
+			"primary", routePlan.Primary,
+			"fallback_count", len(routePlan.Fallbacks),
+			"capability_count", len(routePlan.Capabilities),
+		)
 	}
 	if routePlan.Primary != athenarouter.RouteResearch {
 		return nil

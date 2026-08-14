@@ -80,6 +80,8 @@ func (i *Invocation) End(err error, fields ...any) {
 func (i *Invocation) fields(at time.Time, completed bool, elapsed time.Duration, extra ...any) []any {
 	values := make([]any, 0, 10+len(i.base)+len(extra))
 	values = append(values,
+		"span_name", invocationSpanName(i.kind),
+		"span_id", i.id,
 		"call_id", i.id,
 		i.kind, i.name,
 	)
@@ -95,4 +97,11 @@ func (i *Invocation) fields(at time.Time, completed bool, elapsed time.Duration,
 	}
 	values = append(values, extra...)
 	return values
+}
+
+func invocationSpanName(kind string) string {
+	if kind == "model" {
+		return "model.invoke"
+	}
+	return kind + ".invoke"
 }

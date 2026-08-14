@@ -53,7 +53,7 @@ func TestObservedChatModelGenerateLogsUsageAndPreservesCause(t *testing.T) {
 		t.Fatalf("Generate error is missing source context:\n%s", detail)
 	}
 	logged := output.String()
-	for _, expected := range []string{"model call started", "model call failed", "model=gpt-test", "mode=generate", "cost_ms=", "error_chain="} {
+	for _, expected := range []string{"model call started", "model call failed", "span_name=model.invoke", "span_id=", "model=gpt-test", "mode=generate", "cost_ms=", "error_chain="} {
 		if !strings.Contains(logged, expected) {
 			t.Fatalf("model log missing %q:\n%s", expected, logged)
 		}
@@ -96,7 +96,7 @@ func TestObservedChatModelStreamLogsFullLifecycle(t *testing.T) {
 	}
 
 	logged := output.String()
-	for _, expected := range []string{"model call started", "model call completed", "mode=stream", "finish_reason=stop", "total_tokens=10", "chunk_count=1", "cost_ms="} {
+	for _, expected := range []string{"model call started", "model call completed", "span_name=model.invoke", "span_id=", "mode=stream", "finish_reason=stop", "total_tokens=10", "chunk_count=1", "cost_ms="} {
 		if !strings.Contains(logged, expected) {
 			t.Fatalf("stream log missing %q:\n%s", expected, logged)
 		}
