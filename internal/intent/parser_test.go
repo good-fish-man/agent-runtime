@@ -19,6 +19,20 @@ func TestParseCurrentNewsResearch(t *testing.T) {
 	}
 }
 
+func TestParseExplicitPersistentGoal(t *testing.T) {
+	parsed := Parse(Request{Text: "把北海道旅行规划作为长期目标，允许跨天执行并在重启后继续"})
+	if !parsed.HasSignal(SignalPersistentGoal) || !parsed.HasDomain(DomainOrchestration) || parsed.Mode != ModePlan {
+		t.Fatalf("persistent goal was not recognized: %+v", parsed)
+	}
+}
+
+func TestOrdinaryPlanDoesNotBecomePersistentGoal(t *testing.T) {
+	parsed := Parse(Request{Text: "帮我制定五天北海道旅行计划"})
+	if parsed.HasSignal(SignalPersistentGoal) {
+		t.Fatalf("ordinary plan was made durable without explicit intent: %+v", parsed)
+	}
+}
+
 func TestParseEnglishInvestigationResearch(t *testing.T) {
 	parsed := Parse(Request{Text: "Investigate Model Context Protocol architecture and cite reliable official and independent sources."})
 	if !parsed.HasSignal(SignalWebAccess) || parsed.Mode != ModeResearch {

@@ -162,6 +162,7 @@ skills:
 | `ATHENA_AGENT_BROWSER_BIN` | Athena Launcher 安装并校验的 `agent-browser` 可执行文件 |
 | `ATHENA_INTERNAL_SERVICE_TOKEN` | 仅用于 Runtime 向 Client 创建任务的本机共享令牌 |
 | `ATHENA_RUNTIME_CLIENT_INTERNAL_URL` | 内部定时任务地址，默认使用本机 Client `:8090` |
+| `ATHENA_RUNTIME_CLIENT_GOAL_URL` | 声明式长期 Goal 工具调用的受保护内部地址 |
 | `ATHENA_RESEARCH_CACHE_DIR` | 公开研究证据的持久化缓存目录 |
 | `ATHENA_RESEARCH_PROVIDERS` | Provider 白名单，使用逗号分隔（`web,github,wikipedia,arxiv,news`） |
 | `ATHENA_RESEARCH_MAX_QUERIES`、`ATHENA_RESEARCH_MAX_PAGES`、`ATHENA_RESEARCH_MAX_ROUNDS`、`ATHENA_RESEARCH_TIMEOUT_SEC` | 研究预算覆盖参数 |

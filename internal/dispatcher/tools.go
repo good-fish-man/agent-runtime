@@ -32,6 +32,9 @@ func (d *Dispatcher) buildTools(ctx context.Context, plan athenarouter.RoutePlan
 	if d.isBackgroundMonitor() {
 		capabilityIDs = readOnlyMonitorCapabilities(capabilityIDs)
 	}
+	if d.contextBool("persistent_goal_execution") {
+		capabilityIDs = withoutToolNames(capabilityIDs, capability.AutomationSchedule, capability.OrchestrationGoal)
+	}
 	if !d.contextBool("desktop_bridge") {
 		capabilityIDs = withoutToolNames(capabilityIDs, capability.DesktopAction)
 	}
@@ -41,7 +44,7 @@ func (d *Dispatcher) buildTools(ctx context.Context, plan athenarouter.RoutePlan
 			capability.BrowserNavigate, capability.BrowserObserve, capability.BrowserAction, capability.BrowserClose,
 		)
 	}
-	staticCapabilityIDs := withoutToolNames(capabilityIDs, capability.AutomationSchedule, capability.ImageGenerate, capability.VideoGenerate)
+	staticCapabilityIDs := withoutToolNames(capabilityIDs, capability.AutomationSchedule, capability.OrchestrationGoal, capability.ImageGenerate, capability.VideoGenerate)
 	extra, unavailable, err := capability.GlobalRegistry.Resolve(d.workDir, staticCapabilityIDs)
 	if err != nil {
 		log.WarnwCtx(ctx, "capability resolution failed", "error", err)
@@ -49,9 +52,13 @@ func (d *Dispatcher) buildTools(ctx context.Context, plan athenarouter.RoutePlan
 	if len(unavailable) > 0 {
 		log.WarnwCtx(ctx, "capabilities unavailable", "capabilities", unavailable)
 	}
-	if containsToolName(capabilityIDs, capability.AutomationSchedule) && !d.isBackgroundMonitor() {
+	if containsToolName(capabilityIDs, capability.AutomationSchedule) && !d.isBackgroundMonitor() && !d.contextBool("persistent_goal_execution") {
 		extra = append(extra, d.wrapDynamicCapability(capability.AutomationSchedule,
 			tools.NewScheduledTaskCreateTool(d.contextString("user_id"), d.contextString("agent_id"), d.contextString("session_id"), d.contextString("timezone"))))
+	}
+	if containsToolName(capabilityIDs, capability.OrchestrationGoal) && !d.isBackgroundMonitor() && !d.contextBool("persistent_goal_execution") {
+		extra = append(extra, d.wrapDynamicCapability(capability.OrchestrationGoal,
+			tools.NewPersistentGoalCreateTool(d.contextString("user_id"), d.contextString("agent_id"), d.contextString("session_id"))))
 	}
 	if d.isBackgroundMonitor() {
 		return extra, availableCapabilityIDs(capabilityIDs)

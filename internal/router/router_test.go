@@ -125,6 +125,13 @@ func TestRouteScheduledOperationBeforeResearch(t *testing.T) {
 	}
 }
 
+func TestRoutePersistentGoal(t *testing.T) {
+	plan := RouteIntent(intent.Parse(intent.Request{Text: "Create a persistent goal that can resume after restart"}))
+	if plan.Primary != RouteOrchestration || plan.Reason != "persistent_goal_requested" || !plan.UsesCapability(capability.OrchestrationGoal) {
+		t.Fatalf("unexpected persistent goal route: %+v", plan)
+	}
+}
+
 func TestRouteActiveBrowserFollowUp(t *testing.T) {
 	plan := RouteIntent(intent.Parse(intent.Request{Text: "play the second one", ActiveBrowserSession: true}))
 	if plan.Primary != RouteBrowser || plan.Reason != "direct_browser_interaction" {

@@ -74,6 +74,9 @@ func RouteIntent(parsed intent.Intent) RoutePlan {
 	if parsed.HasSignal(intent.SignalScheduled) {
 		add(capability.AutomationSchedule)
 	}
+	if parsed.HasSignal(intent.SignalPersistentGoal) {
+		add(capability.OrchestrationGoal)
+	}
 	if directBrowser {
 		plan.ExcludedCapabilities = []string{
 			capability.InternetSearch,

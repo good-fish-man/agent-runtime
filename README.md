@@ -162,6 +162,7 @@ Environment overrides:
 | `ATHENA_AGENT_BROWSER_BIN` | Verified `agent-browser` executable installed by Athena Launcher |
 | `ATHENA_INTERNAL_SERVICE_TOKEN` | Shared local token used only for Runtime-to-Client task creation |
 | `ATHENA_RUNTIME_CLIENT_INTERNAL_URL` | Internal scheduled-task endpoint (defaults to local Client `:8090`) |
+| `ATHENA_RUNTIME_CLIENT_GOAL_URL` | Token-protected persistent-goal endpoint used by the declarative goal tool |
 | `ATHENA_RESEARCH_CACHE_DIR` | Persistent public research-evidence cache directory |
 | `ATHENA_RESEARCH_PROVIDERS` | Comma-separated Provider allowlist (`web,github,wikipedia,arxiv,news`) |
 | `ATHENA_RESEARCH_MAX_QUERIES`, `ATHENA_RESEARCH_MAX_PAGES`, `ATHENA_RESEARCH_MAX_ROUNDS`, `ATHENA_RESEARCH_TIMEOUT_SEC` | Research budget overrides |

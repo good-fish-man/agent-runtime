@@ -102,6 +102,10 @@ var (
 	taskKeywords              = []string{"子任务", "并行任务", "任务状态", "parallel task", "subtask", "delegate"}
 	waitKeywords              = []string{"等待", "稍后", "sleep", "wait", "delay"}
 	scheduledTaskKeywords     = []string{"定时", "周期查询", "持续查询", "到货提醒", "库存提醒", "抢票", "余票", "放票", "抢购", "秒杀", "挂号", "号源", "预约提醒", "每分钟", "每小时", "每天", "schedule", "scheduled", "monitor stock", "ticket availability", "appointment slot", "restock"}
+	persistentGoalKeywords    = []string{
+		"长期目标", "长期任务", "跨天执行", "跨设备继续", "后台继续", "持续执行这个目标", "稍后恢复", "断线恢复", "重启后继续",
+		"persistent goal", "long-running goal", "long running goal", "continue over days", "continue across devices", "keep working in the background", "resume later", "resume after restart",
+	}
 )
 
 func Parse(request Request) Intent {
@@ -233,6 +237,12 @@ func Parse(request Request) Intent {
 		addDomain(DomainAutomation)
 		result.Mode = ModeExecute
 	}
+	if matchesAny(normalized, persistentGoalKeywords) {
+		addSignal(SignalPersistentGoal)
+		addDomain(DomainOrchestration)
+		addDomain(DomainPlanning)
+		result.Mode = ModePlan
+	}
 
 	if openTarget && !explicitDesktop && !directBrowser && !webAccess {
 		addDomain(DomainBrowser)
@@ -254,7 +264,7 @@ func Parse(request Request) Intent {
 
 func confidence(parsed Intent) float64 {
 	switch {
-	case parsed.HasSignal(SignalDirectBrowserControl), parsed.HasSignal(SignalScheduled):
+	case parsed.HasSignal(SignalDirectBrowserControl), parsed.HasSignal(SignalScheduled), parsed.HasSignal(SignalPersistentGoal):
 		return 0.98
 	case parsed.HasSignal(SignalBrowserAuthentication), parsed.HasSignal(SignalLocalDeviceFile), parsed.HasSignal(SignalExplicitDesktop):
 		return 0.95

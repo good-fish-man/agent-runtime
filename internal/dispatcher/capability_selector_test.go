@@ -314,6 +314,13 @@ func TestScheduledMonitoringIntentEnablesCreationTool(t *testing.T) {
 	}
 }
 
+func TestPersistentGoalIntentEnablesDeclarativeCreation(t *testing.T) {
+	selected := selectBuiltinCapabilities("Create a persistent goal and resume it after restart", false)
+	if !contains(selected, capability.OrchestrationGoal) {
+		t.Fatalf("persistent goal capability not selected: %v", selected)
+	}
+}
+
 func TestBackgroundMonitorCapabilitiesAreReadOnly(t *testing.T) {
 	selected := readOnlyMonitorCapabilities([]string{capability.SystemShell, capability.FilesystemWrite, capability.InternetSearch, capability.BrowserRead})
 	if contains(selected, capability.SystemShell) || contains(selected, capability.FilesystemWrite) {

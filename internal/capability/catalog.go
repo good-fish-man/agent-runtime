@@ -37,6 +37,7 @@ const (
 	TaskUpdate         = "task.update"
 	InteractionAsk     = "interaction.ask"
 	AutomationSchedule = "automation.schedule"
+	OrchestrationGoal  = "orchestration.goal"
 	ImageGenerate      = "media.image.generate"
 	VideoGenerate      = "media.video.generate"
 )
@@ -88,6 +89,7 @@ func init() {
 		{ID: MapsRoute, Description: "Calculate a route", Input: map[string]string{"origin": "string", "destination": "string"}, Output: "Route", ReadOnly: true, Reason: "No maps provider configured"},
 		{ID: PythonExecute, Description: "Execute Python code in an isolated sandbox", Input: map[string]string{"code": "string"}, Output: "PythonResult", Risk: "high", Reason: "No isolated Python provider configured"},
 		{ID: AutomationSchedule, Description: "Create a persistent scheduled task", Input: map[string]string{"schedule": "string"}, Output: "ScheduledTask", Risk: "medium", Reason: "Requires request-scoped provider"},
+		{ID: OrchestrationGoal, Description: "Create a durable bounded goal with a finite specialist graph", Input: map[string]string{"objective": "string", "tasks": "SpecialistTask[]"}, Output: "PersistentGoal", Risk: "medium", Reason: "Requires request-scoped provider"},
 		{ID: ImageGenerate, Description: "Generate an image", Input: map[string]string{"prompt": "string"}, Output: "ImageResult", Risk: "medium", Reason: "Requires a request-scoped image model"},
 		{ID: VideoGenerate, Description: "Generate a video", Input: map[string]string{"prompt": "string"}, Output: "VideoResult", Risk: "medium", Reason: "Requires a request-scoped video model"},
 	}

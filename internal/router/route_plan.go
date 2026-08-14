@@ -5,14 +5,15 @@ import "github.com/good-fish-man/agent-runtime/internal/intent"
 type Route string
 
 const (
-	RouteConversation Route = "conversation"
-	RouteResearch     Route = "research"
-	RouteBrowser      Route = "browser"
-	RouteFile         Route = "file"
-	RouteDesktop      Route = "desktop"
-	RouteAutomation   Route = "automation"
-	RoutePlanning     Route = "planning"
-	RouteTask         Route = "task"
+	RouteConversation  Route = "conversation"
+	RouteResearch      Route = "research"
+	RouteBrowser       Route = "browser"
+	RouteFile          Route = "file"
+	RouteDesktop       Route = "desktop"
+	RouteAutomation    Route = "automation"
+	RouteOrchestration Route = "orchestration"
+	RoutePlanning      Route = "planning"
+	RouteTask          Route = "task"
 )
 
 type RoutePlan struct {

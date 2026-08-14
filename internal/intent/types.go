@@ -3,14 +3,15 @@ package intent
 type Domain string
 
 const (
-	DomainConversation Domain = "conversation"
-	DomainResearch     Domain = "research"
-	DomainBrowser      Domain = "browser"
-	DomainFile         Domain = "file"
-	DomainDesktop      Domain = "desktop"
-	DomainAutomation   Domain = "automation"
-	DomainPlanning     Domain = "planning"
-	DomainTask         Domain = "task"
+	DomainConversation  Domain = "conversation"
+	DomainResearch      Domain = "research"
+	DomainBrowser       Domain = "browser"
+	DomainFile          Domain = "file"
+	DomainDesktop       Domain = "desktop"
+	DomainAutomation    Domain = "automation"
+	DomainOrchestration Domain = "orchestration"
+	DomainPlanning      Domain = "planning"
+	DomainTask          Domain = "task"
 )
 
 type Mode string
@@ -46,6 +47,7 @@ const (
 	SignalTaskManagement        Signal = "task_management"
 	SignalWait                  Signal = "wait"
 	SignalScheduled             Signal = "scheduled"
+	SignalPersistentGoal        Signal = "persistent_goal"
 )
 
 type Request struct {

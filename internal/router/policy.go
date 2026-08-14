@@ -22,6 +22,8 @@ func (Policy) Decide(parsed intent.Intent) Decision {
 		return Decision{Primary: RouteBrowser, Reason: "browser_screenshot"}
 	case parsed.HasSignal(intent.SignalBrowserClose):
 		return Decision{Primary: RouteBrowser, Reason: "browser_close"}
+	case parsed.HasSignal(intent.SignalPersistentGoal):
+		return Decision{Primary: RouteOrchestration, Reason: "persistent_goal_requested"}
 	case parsed.HasSignal(intent.SignalScheduled):
 		return Decision{Primary: RouteAutomation, Fallbacks: []Route{RouteResearch}, Reason: "scheduled_operation"}
 	case parsed.HasSignal(intent.SignalLocalDeviceFile), parsed.HasSignal(intent.SignalUploadedFile):
