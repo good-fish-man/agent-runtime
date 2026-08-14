@@ -202,18 +202,22 @@ The default adaptive budget permits up to 6 Provider searches, 8 page fetches, 3
 ### Signed Capability Providers
 
 Runtime loads only `ACTIVE` entries from the v0.8 Provider Registry. Every
-entry must resolve to an immutable `provider_id/version` directory, match its
-recorded SHA-256, verify against a trusted Ed25519 key, support the current
-platform/runtime version, and stay within the Registry's permission and resource
-grants. Registration is transactional: one invalid capability rolls back the
-whole Provider without disturbing built-in capabilities or other Providers.
+entry must resolve to an immutable `provider_id/version` directory, contain no
+symlinks or executable assets, match the signed manifest/SBOM/asset payload and
+trusted machine-scan digest, verify against an Ed25519 trust key, pass its
+health check, support the current platform/runtime version, and stay within the
+Registry's permission and resource grants. Registration is transactional: one
+invalid capability rolls back the whole Provider without disturbing built-in
+capabilities or other Providers.
 
 External Providers never receive Runtime credentials directly and cannot run
 generated code. Network requests are host-mediated, restricted to exact granted
 domains, protected against private-network resolution and redirect escape, and
 bounded by input/output size, timeout, and concurrency. Each invocation emits a
 JSONL audit record containing Provider/version, capability, trace, permission
-snapshot, hashes, timing, outcome, and Observation reference. Administrators can
+and resource snapshots, user/task provenance, manifest/input/output/Observation
+hashes, timing, outcome, and Observation reference. Repeated failures open a
+Provider-local circuit instead of destabilizing Runtime. Administrators can
 reload the Registry through the loopback-only `POST /admin/plugins/reload`.
 
 Server-side research uses `internet.search` and `internet.fetch` and never opens the user's local browser as a fallback. Local `browser.*` capabilities are exposed only when the user explicitly asks to open, navigate, observe, or interact with a visible page. An unknown named site may hand off URL discovery to Search System, then resume the original browser task in the same session. Authenticated pages switch to `browser.login`, where the user completes password, CAPTCHA, 2FA, or QR login; credentials and cookie values are never tool arguments. Athena Launcher installs the native browser CLI; standalone development must install `agent-browser` or set `ATHENA_AGENT_BROWSER_BIN`. See [Common Browser Commands](https://github.com/good-fish-man/athena-launcher/blob/main/docs/browser-command-guide.md).

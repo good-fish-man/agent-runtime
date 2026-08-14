@@ -23,6 +23,11 @@ import (
 
 const providerObservationSchema = "athena.provider-observation.v1"
 
+const (
+	circuitFailureThreshold = 3
+	circuitOpenDuration     = 30 * time.Second
+)
+
 type Manager struct {
 	mu        sync.RWMutex
 	providers map[string]*binding
@@ -30,12 +35,15 @@ type Manager struct {
 }
 
 type binding struct {
-	manager  *Manager
-	manifest pluginv1.ProviderManifest
-	entry    pluginv1.RegistryEntry
-	digest   string
-	sem      chan struct{}
-	client   *http.Client
+	manager             *Manager
+	manifest            pluginv1.ProviderManifest
+	entry               pluginv1.RegistryEntry
+	digest              string
+	sem                 chan struct{}
+	client              *http.Client
+	stateMu             sync.Mutex
+	consecutiveFailures int
+	circuitOpenUntil    time.Time
 }
 
 func NewManager(audit AuditSink) *Manager {
@@ -43,9 +51,9 @@ func NewManager(audit AuditSink) *Manager {
 }
 
 func (m *Manager) add(manifest pluginv1.ProviderManifest, entry pluginv1.RegistryEntry, digest string) *binding {
-	value := &binding{manager: m, manifest: manifest, entry: entry, digest: digest, sem: make(chan struct{}, manifest.Resources.MaxConcurrency)}
+	value := &binding{manager: m, manifest: manifest, entry: entry, digest: digest, sem: make(chan struct{}, entry.GrantedResources.MaxConcurrency)}
 	if manifest.Runtime.Kind == pluginv1.RuntimeHTTPJSON {
-		value.client = restrictedClient(manifest.Runtime.BaseURL, time.Duration(manifest.Resources.MaxExecutionMS)*time.Millisecond)
+		value.client = restrictedClient(manifest.Runtime.BaseURL, invocationTimeout(entry.GrantedResources))
 	}
 	m.mu.Lock()
 	m.providers[manifest.ProviderID+"@"+manifest.Version] = value
@@ -71,18 +79,21 @@ func (m *Manager) Providers() []pluginv1.ProviderManifest {
 
 func (m *Manager) invoke(ctx context.Context, value *binding, capability pluginv1.Capability, input string) (output string, err error) {
 	started := time.Now().UTC()
+	scope := invocationScopeFromContext(ctx)
 	trace := pluginv1.InvocationTrace{
 		Schema: pluginv1.Schema, InvocationID: ulid.Make().String(), ProviderID: value.manifest.ProviderID,
-		ProviderVersion: value.manifest.Version, CapabilityID: capability.ID, TraceID: log.GetReqId(),
+		ProviderVersion: value.manifest.Version, CapabilityID: capability.ID, OwnerID: scope.OwnerID, TaskID: scope.TaskID, TraceID: log.GetReqId(),
 		Status: pluginv1.InvocationRunning, PermissionSnapshot: value.entry.GrantedPermissions,
-		InputSHA256: digestString(input), StartedAt: started,
+		ManifestSHA256: value.digest, ResourceSnapshot: value.entry.GrantedResources, InputSHA256: digestString(input), StartedAt: started,
 	}
 	if trace.TraceID == "" {
 		trace.TraceID = "plugin-" + strings.ToLower(trace.InvocationID)
 	}
+	runtimeAttempted := false
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("provider invocation isolated panic: %v", recovered)
+			runtimeAttempted = true
 		}
 		trace.FinishedAt = time.Now().UTC()
 		trace.DurationMS = trace.FinishedAt.Sub(started).Milliseconds()
@@ -94,7 +105,11 @@ func (m *Manager) invoke(ctx context.Context, value *binding, capability pluginv
 		} else {
 			trace.Status = pluginv1.InvocationSucceeded
 			trace.OutputSHA256 = digestString(output)
-			trace.ObservationRef = "provider-observation:" + trace.OutputSHA256
+			trace.ObservationSHA256 = trace.OutputSHA256
+			trace.ObservationRef = "provider-observation:" + trace.ObservationSHA256
+		}
+		if runtimeAttempted {
+			value.recordOutcome(err)
 		}
 		if m.audit == nil {
 			auditErr := fmt.Errorf("provider invocation audit sink is required")
@@ -113,10 +128,19 @@ func (m *Manager) invoke(ctx context.Context, value *binding, capability pluginv
 			}
 		}
 	}()
+	if circuitErr := value.allowInvocation(started); circuitErr != nil {
+		trace.Status = pluginv1.InvocationUnavailable
+		return "", circuitErr
+	}
 
-	if len(input) > value.manifest.Resources.MaxInputBytes {
+	limits := value.entry.GrantedResources
+	if len(input) > limits.MaxInputBytes {
 		trace.Status = pluginv1.InvocationDenied
-		return "", fmt.Errorf("provider input exceeds %d bytes", value.manifest.Resources.MaxInputBytes)
+		return "", fmt.Errorf("provider input exceeds %d bytes", limits.MaxInputBytes)
+	}
+	if int64(limits.MaxInputBytes)+int64(limits.MaxOutputBytes) > int64(limits.MaxMemoryMB)<<20 {
+		trace.Status = pluginv1.InvocationDenied
+		return "", fmt.Errorf("provider byte budgets exceed the granted memory envelope")
 	}
 	var decoded any
 	if decodeErr := json.Unmarshal([]byte(input), &decoded); decodeErr != nil {
@@ -128,7 +152,7 @@ func (m *Manager) invoke(ctx context.Context, value *binding, capability pluginv
 		return "", schemaErr
 	}
 
-	runCtx, cancel := context.WithTimeout(ctx, time.Duration(value.manifest.Resources.MaxExecutionMS)*time.Millisecond)
+	runCtx, cancel := context.WithTimeout(ctx, invocationTimeout(limits))
 	defer cancel()
 	select {
 	case value.sem <- struct{}{}:
@@ -137,12 +161,13 @@ func (m *Manager) invoke(ctx context.Context, value *binding, capability pluginv
 		return "", fmt.Errorf("provider concurrency wait: %w", runCtx.Err())
 	}
 
+	runtimeAttempted = true
 	raw, runErr := invokeRuntime(runCtx, value, capability, []byte(input))
 	if runErr != nil {
 		return "", runErr
 	}
-	if len(raw) > value.manifest.Resources.MaxOutputBytes {
-		return "", fmt.Errorf("provider output exceeds %d bytes", value.manifest.Resources.MaxOutputBytes)
+	if len(raw) > limits.MaxOutputBytes {
+		return "", fmt.Errorf("provider output exceeds %d bytes", limits.MaxOutputBytes)
 	}
 	var data any
 	if decodeErr := json.Unmarshal(raw, &data); decodeErr != nil {
@@ -162,6 +187,57 @@ func (m *Manager) invoke(ctx context.Context, value *binding, capability pluginv
 		return "", fmt.Errorf("encode provider observation: %w", encodeErr)
 	}
 	return string(encoded), nil
+}
+
+func (m *Manager) healthCheck(ctx context.Context, value *binding) error {
+	input, err := json.Marshal(value.manifest.HealthCheck.Input)
+	if err != nil {
+		return fmt.Errorf("encode Provider health-check input: %w", err)
+	}
+	var capability pluginv1.Capability
+	for _, candidate := range value.manifest.Capabilities {
+		if candidate.ID == value.manifest.HealthCheck.Operation {
+			capability = candidate
+			break
+		}
+	}
+	healthCtx, cancel := context.WithTimeout(WithInvocationScope(ctx, "system", "provider-load:"+value.manifest.ProviderID+"@"+value.manifest.Version), time.Duration(value.manifest.HealthCheck.TimeoutMS)*time.Millisecond)
+	defer cancel()
+	if _, err := m.invoke(healthCtx, value, capability, string(input)); err != nil {
+		return fmt.Errorf("Provider health check failed: %w", err)
+	}
+	return nil
+}
+
+func (b *binding) allowInvocation(now time.Time) error {
+	b.stateMu.Lock()
+	defer b.stateMu.Unlock()
+	if now.Before(b.circuitOpenUntil) {
+		return fmt.Errorf("provider circuit is open until %s", b.circuitOpenUntil.Format(time.RFC3339Nano))
+	}
+	if !b.circuitOpenUntil.IsZero() {
+		b.circuitOpenUntil = time.Time{}
+		b.consecutiveFailures = 0
+	}
+	return nil
+}
+
+func (b *binding) recordOutcome(err error) {
+	b.stateMu.Lock()
+	defer b.stateMu.Unlock()
+	if err == nil {
+		b.consecutiveFailures = 0
+		b.circuitOpenUntil = time.Time{}
+		return
+	}
+	b.consecutiveFailures++
+	if b.consecutiveFailures >= circuitFailureThreshold {
+		b.circuitOpenUntil = time.Now().UTC().Add(circuitOpenDuration)
+	}
+}
+
+func invocationTimeout(limits pluginv1.ResourceLimits) time.Duration {
+	return time.Duration(limits.MaxExecutionMS) * time.Millisecond
 }
 
 func safeAuditRecord(sink AuditSink, ctx context.Context, trace pluginv1.InvocationTrace) (err error) {
@@ -217,7 +293,7 @@ func invokeRuntime(ctx context.Context, value *binding, capability pluginv1.Capa
 			return nil, fmt.Errorf("provider HTTP request: %w", err)
 		}
 		defer response.Body.Close()
-		limited := io.LimitReader(response.Body, int64(value.manifest.Resources.MaxOutputBytes)+1)
+		limited := io.LimitReader(response.Body, int64(value.entry.GrantedResources.MaxOutputBytes)+1)
 		result, readErr := io.ReadAll(limited)
 		if readErr != nil {
 			return nil, fmt.Errorf("read provider response: %w", readErr)

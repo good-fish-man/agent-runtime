@@ -19,6 +19,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/good-fish-man/agent-runtime/internal/capability"
 	pluginv1 "github.com/good-fish-man/athena-protocol/protocol/plugin/v1"
+	pluginsdk "github.com/good-fish-man/athena-protocol/sdk/plugin"
 )
 
 const (
@@ -69,6 +70,9 @@ func LoadAndRegister(ctx context.Context, registry *capability.Registry, cfg Con
 	if !cfg.Enabled {
 		return manager, report, nil
 	}
+	if !cfg.RequireSignature {
+		return manager, report, fmt.Errorf("unsigned Capability Providers are forbidden; require_signature must be true")
+	}
 	index, err := loadRegistryIndex(cfg.RegistryPath)
 	if err != nil {
 		return manager, report, err
@@ -98,6 +102,11 @@ func LoadAndRegister(ctx context.Context, registry *capability.Registry, cfg Con
 			continue
 		}
 		binding := manager.add(loaded.manifest, loaded.entry, loaded.digest)
+		if healthErr := manager.healthCheck(ctx, binding); healthErr != nil {
+			report.Rejected[identity] = healthErr.Error()
+			manager.remove(identity)
+			continue
+		}
 		for _, declared := range loaded.manifest.Capabilities {
 			definition := capability.Definition{
 				ID: declared.ID, Description: declared.Description, Output: "ProviderObservation", ReadOnly: declared.ReadOnly,
@@ -171,6 +180,9 @@ func loadProviderPackage(cfg Config, entry pluginv1.RegistryEntry, keys map[stri
 		return loadedPackage{}, fmt.Errorf("registry identity contains an unsafe package path")
 	}
 	directory := filepath.Join(cfg.Directory, entry.ProviderID, entry.Version)
+	if err := validatePackageDirectory(cfg.Directory, directory); err != nil {
+		return loadedPackage{}, err
+	}
 	manifestBytes, err := readBounded(filepath.Join(directory, pluginv1.ManifestFile), maxManifestBytes)
 	if err != nil {
 		return loadedPackage{}, fmt.Errorf("read plugin manifest: %w", err)
@@ -189,6 +201,9 @@ func loadProviderPackage(cfg Config, entry pluginv1.RegistryEntry, keys map[stri
 	if err := entry.Validate(manifest); err != nil {
 		return loadedPackage{}, fmt.Errorf("validate registry grant: %w", err)
 	}
+	if err := entry.ValidateRuntimeGrant(manifest); err != nil {
+		return loadedPackage{}, fmt.Errorf("validate Runtime grant: %w", err)
+	}
 	if !platformSupported(manifest.Platforms) {
 		return loadedPackage{}, fmt.Errorf("provider does not support %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
@@ -199,18 +214,53 @@ func loadProviderPackage(cfg Config, entry pluginv1.RegistryEntry, keys map[stri
 	if err != nil || len(bytes.TrimSpace(sbom)) == 0 {
 		return loadedPackage{}, fmt.Errorf("read required SBOM: %w", err)
 	}
-	if cfg.RequireSignature {
-		signatureBytes, signatureErr := readBounded(filepath.Join(directory, pluginv1.SignatureFile), maxManifestBytes)
-		if signatureErr != nil {
-			return loadedPackage{}, fmt.Errorf("read plugin signature: %w", signatureErr)
+	assets := make(map[string][]byte, len(manifest.Package.Assets))
+	for _, asset := range manifest.Package.Assets {
+		content, assetErr := readBounded(filepath.Join(directory, filepath.FromSlash(asset.Path)), asset.SizeBytes)
+		if assetErr != nil {
+			return loadedPackage{}, fmt.Errorf("read signed plugin asset %s: %w", asset.Path, assetErr)
 		}
-		var envelope pluginv1.SignatureEnvelope
-		if err := decodeStrict(signatureBytes, &envelope); err != nil {
-			return loadedPackage{}, fmt.Errorf("parse plugin signature: %w", err)
-		}
-		if err := verifySignature(envelope, keys, append(append(append([]byte(nil), manifestBytes...), '\n'), sbom...)); err != nil {
-			return loadedPackage{}, err
-		}
+		assets[asset.Path] = content
+	}
+	signatureBytes, signatureErr := readBounded(filepath.Join(directory, pluginv1.SignatureFile), maxManifestBytes)
+	if signatureErr != nil {
+		return loadedPackage{}, fmt.Errorf("read plugin signature: %w", signatureErr)
+	}
+	var envelope pluginv1.SignatureEnvelope
+	if err := decodeStrict(signatureBytes, &envelope); err != nil {
+		return loadedPackage{}, fmt.Errorf("parse plugin signature: %w", err)
+	}
+	providerPackage := pluginsdk.Package{Manifest: manifest, ManifestJSON: manifestBytes, SBOMJSON: sbom, Assets: assets, Signature: envelope}
+	if err := pluginsdk.VerifyPackageWithoutTrust(providerPackage); err != nil {
+		return loadedPackage{}, fmt.Errorf("validate plugin package: %w", err)
+	}
+	payloadDigest := pluginsdk.Digest(pluginsdk.SignaturePayload(manifestBytes, sbom, assets))
+	if envelope.PayloadSHA256 != payloadDigest {
+		return loadedPackage{}, fmt.Errorf("plugin signature payload digest mismatch")
+	}
+	key, trusted := keys[envelope.KeyID]
+	if !trusted {
+		return loadedPackage{}, fmt.Errorf("plugin signing key is not trusted")
+	}
+	if err := pluginsdk.Verify(providerPackage, key); err != nil {
+		return loadedPackage{}, err
+	}
+	scanBytes, scanErr := readBounded(filepath.Join(directory, pluginv1.ScanReportFile), maxManifestBytes)
+	if scanErr != nil {
+		return loadedPackage{}, fmt.Errorf("read plugin scan report: %w", scanErr)
+	}
+	if pluginsdk.Digest(scanBytes) != entry.ScanReportSHA256 {
+		return loadedPackage{}, fmt.Errorf("plugin scan report SHA-256 mismatch")
+	}
+	var scan pluginv1.ScanReport
+	if err := decodeStrict(scanBytes, &scan); err != nil {
+		return loadedPackage{}, fmt.Errorf("parse plugin scan report: %w", err)
+	}
+	if err := scan.Validate(manifest, digest, payloadDigest); err != nil {
+		return loadedPackage{}, fmt.Errorf("validate plugin scan report: %w", err)
+	}
+	if scan.Status != pluginv1.ScanPassed {
+		return loadedPackage{}, fmt.Errorf("plugin machine scan did not pass")
 	}
 	return loadedPackage{manifest: manifest, entry: entry, digest: digest}, nil
 }
@@ -220,28 +270,20 @@ func safePackageSegment(value string) bool {
 		!strings.ContainsAny(value, `/\\`)
 }
 
-func verifySignature(envelope pluginv1.SignatureEnvelope, keys map[string]ed25519.PublicKey, payload []byte) error {
-	if envelope.Algorithm != pluginv1.SignatureEd25519 {
-		return fmt.Errorf("unsupported plugin signature algorithm")
-	}
-	key, ok := keys[envelope.KeyID]
-	if !ok {
-		return fmt.Errorf("plugin signing key is not trusted")
-	}
-	signature, err := base64.StdEncoding.DecodeString(envelope.Signature)
-	if err != nil || !ed25519.Verify(key, payload, signature) {
-		return fmt.Errorf("plugin signature verification failed")
-	}
-	return nil
-}
-
 func readBounded(path string, limit int64) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("package file must be a regular non-symlink file")
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
-	info, err := file.Stat()
+	info, err = file.Stat()
 	if err != nil {
 		return nil, err
 	}
@@ -256,6 +298,22 @@ func readBounded(path string, limit int64) ([]byte, error) {
 		return nil, fmt.Errorf("file exceeds %d bytes", limit)
 	}
 	return data, nil
+}
+
+func validatePackageDirectory(root, directory string) error {
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return fmt.Errorf("resolve plugin package root: %w", err)
+	}
+	realDirectory, err := filepath.EvalSymlinks(directory)
+	if err != nil {
+		return fmt.Errorf("resolve plugin package directory: %w", err)
+	}
+	relative, err := filepath.Rel(realRoot, realDirectory)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("plugin package directory escapes configured root")
+	}
+	return nil
 }
 
 func decodeStrict(data []byte, target any) error {

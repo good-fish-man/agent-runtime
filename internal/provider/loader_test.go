@@ -15,6 +15,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/good-fish-man/agent-runtime/internal/capability"
 	pluginv1 "github.com/good-fish-man/athena-protocol/protocol/plugin/v1"
+	pluginsdk "github.com/good-fish-man/athena-protocol/sdk/plugin"
 )
 
 const testCapabilityID = "com.example.echo.echo"
@@ -41,7 +42,7 @@ func TestLoadSignedProviderAndRecordInvocation(t *testing.T) {
 	if !ok {
 		t.Fatal("resolved provider is not invokable")
 	}
-	output, err := invokable.InvokableRun(context.Background(), `{"name":"Athena"}`)
+	output, err := invokable.InvokableRun(WithInvocationScope(context.Background(), "user-1", "task-1"), `{"name":"Athena"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,8 +57,76 @@ func TestLoadSignedProviderAndRecordInvocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(audit), `"status":"SUCCEEDED"`) || !strings.Contains(string(audit), manifest.ProviderID) {
+	if !strings.Contains(string(audit), `"status":"SUCCEEDED"`) || !strings.Contains(string(audit), manifest.ProviderID) ||
+		!strings.Contains(string(audit), `"owner_id":"user-1"`) || !strings.Contains(string(audit), `"task_id":"task-1"`) {
 		t.Fatalf("missing invocation provenance: %s", audit)
+	}
+}
+
+func TestTamperedSignedAssetIsRejected(t *testing.T) {
+	root := t.TempDir()
+	manifest := testManifest()
+	entry, cfg := writeSignedPackage(t, root, manifest)
+	assetPath := filepath.Join(cfg.Directory, manifest.ProviderID, manifest.Version, "runtime", "spec.json")
+	if err := os.WriteFile(assetPath, []byte(`{"kind":"tampered"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	writeRegistry(t, cfg.RegistryPath, entry)
+
+	registry := capability.NewRegistry()
+	_, report, err := LoadAndRegister(context.Background(), registry, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Rejected) != 1 || len(registry.List()) != 0 {
+		t.Fatalf("tampered asset was not rejected: %+v", report)
+	}
+}
+
+func TestEnabledProviderLoaderRejectsUnsignedMode(t *testing.T) {
+	registry := capability.NewRegistry()
+	_, _, err := LoadAndRegister(context.Background(), registry, Config{Enabled: true, RequireSignature: false})
+	if err == nil || !strings.Contains(err.Error(), "unsigned Capability Providers are forbidden") {
+		t.Fatalf("unsigned Provider mode was accepted: %v", err)
+	}
+}
+
+func TestProviderHealthCheckGatesRegistration(t *testing.T) {
+	root := t.TempDir()
+	manifest := testManifest()
+	manifest.Runtime.StaticResponses[testCapabilityID] = json.RawMessage(`{}`)
+	entry, cfg := writeSignedPackage(t, root, manifest)
+	writeRegistry(t, cfg.RegistryPath, entry)
+
+	registry := capability.NewRegistry()
+	_, report, err := LoadAndRegister(context.Background(), registry, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Rejected) != 1 || !strings.Contains(report.Rejected[manifest.ProviderID+"@"+manifest.Version], "health check") {
+		t.Fatalf("unhealthy Provider reached the capability Registry: %+v", report)
+	}
+}
+
+func TestPackageSymlinkIsRejected(t *testing.T) {
+	root := t.TempDir()
+	manifest := testManifest()
+	entry, cfg := writeSignedPackage(t, root, manifest)
+	assetPath := filepath.Join(cfg.Directory, manifest.ProviderID, manifest.Version, "runtime", "spec.json")
+	if err := os.Remove(assetPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(cfg.Directory, manifest.ProviderID, manifest.Version, pluginv1.ManifestFile), assetPath); err != nil {
+		t.Fatal(err)
+	}
+	writeRegistry(t, cfg.RegistryPath, entry)
+	registry := capability.NewRegistry()
+	_, report, err := LoadAndRegister(context.Background(), registry, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Rejected) != 1 {
+		t.Fatalf("symlinked package asset was accepted: %+v", report)
 	}
 }
 
@@ -166,7 +235,7 @@ func testManifest() pluginv1.ProviderManifest {
 		}},
 		Platforms: []pluginv1.Platform{{OS: "any", Arch: "any"}}, RiskFloor: pluginv1.RiskR0,
 		Resources:   pluginv1.ResourceLimits{MaxExecutionMS: 1000, MaxInputBytes: 4096, MaxOutputBytes: 4096, MaxConcurrency: 1, MaxMemoryMB: 32, MaxCPUMillis: 250},
-		HealthCheck: pluginv1.HealthCheck{Operation: testCapabilityID, TimeoutMS: 500},
+		HealthCheck: pluginv1.HealthCheck{Operation: testCapabilityID, TimeoutMS: 500, Input: map[string]any{"name": "healthcheck"}},
 		Observation: pluginv1.ObservationContract{Schema: objectSchema()},
 		Runtime:     pluginv1.RuntimeSpec{Kind: pluginv1.RuntimeStaticJSON, StaticResponses: map[string]json.RawMessage{testCapabilityID: json.RawMessage(`{"message":"hello"}`)}},
 		SBOMRef:     pluginv1.SBOMFile, IssuedAt: time.Date(2026, 8, 15, 0, 0, 0, 0, time.UTC),
@@ -184,27 +253,33 @@ func writeSignedPackage(t *testing.T, root string, manifest pluginv1.ProviderMan
 		t.Fatal(err)
 	}
 	directory := filepath.Join(root, "packages")
-	packageDir := filepath.Join(directory, manifest.ProviderID, manifest.Version)
-	if err := os.MkdirAll(packageDir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	manifestBytes, err := json.Marshal(manifest)
+	providerPackage, err := pluginsdk.Build(manifest, map[string]any{"bomFormat": "CycloneDX", "specVersion": "1.5"}, "test-key", privateKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sbom := []byte(`{"bomFormat":"CycloneDX","specVersion":"1.5"}`)
-	signature := ed25519.Sign(privateKey, append(append(append([]byte(nil), manifestBytes...), '\n'), sbom...))
-	envelope := pluginv1.SignatureEnvelope{Algorithm: pluginv1.SignatureEd25519, KeyID: "test-key", Signature: base64.StdEncoding.EncodeToString(signature)}
-	if err := os.WriteFile(filepath.Join(packageDir, pluginv1.ManifestFile), manifestBytes, 0600); err != nil {
+	packageDir, err := pluginsdk.Write(directory, providerPackage)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(packageDir, pluginv1.SBOMFile), sbom, 0600); err != nil {
+	manifestBytes := providerPackage.ManifestJSON
+	scan := pluginv1.ScanReport{
+		Schema: pluginv1.ScanSchema, ScanID: "scan-test", ProviderID: providerPackage.Manifest.ProviderID, Version: providerPackage.Manifest.Version,
+		ManifestSHA256: pluginv1.ManifestSHA256(manifestBytes), PayloadSHA256: providerPackage.Signature.PayloadSHA256,
+		ScannerVersion: "runtime-test", Status: pluginv1.ScanPassed,
+		Checks: []pluginv1.ScanCheck{{Name: "signature", Passed: true}}, Findings: []pluginv1.ScanFinding{},
+		ScannedAt: time.Date(2026, 8, 15, 0, 0, 0, 0, time.UTC),
+	}
+	scanBytes, err := json.Marshal(scan)
+	if err != nil {
 		t.Fatal(err)
 	}
-	writeJSON(t, filepath.Join(packageDir, pluginv1.SignatureFile), envelope)
+	if err := os.WriteFile(filepath.Join(packageDir, pluginv1.ScanReportFile), scanBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
 	trustPath := filepath.Join(root, "trust-store.json")
 	writeJSON(t, trustPath, trustStore{Schema: "athena.plugin-trust.v1", Keys: []trustKey{{KeyID: "test-key", Algorithm: pluginv1.SignatureEd25519, PublicKey: base64.StdEncoding.EncodeToString(publicKey)}}})
-	entry := testEntry(manifest, pluginv1.ManifestSHA256(manifestBytes))
+	entry := testEntry(providerPackage.Manifest, pluginv1.ManifestSHA256(manifestBytes))
+	entry.ScanReportSHA256 = pluginsdk.Digest(scanBytes)
 	return entry, Config{Enabled: true, Directory: directory, RegistryPath: filepath.Join(root, "registry.json"), TrustStorePath: trustPath, AuditPath: filepath.Join(root, "audit.jsonl"), RuntimeVersion: "0.8.0", RequireSignature: true}
 }
 
@@ -212,7 +287,7 @@ func testEntry(manifest pluginv1.ProviderManifest, digest string) pluginv1.Regis
 	now := time.Date(2026, 8, 15, 0, 0, 0, 0, time.UTC)
 	return pluginv1.RegistryEntry{
 		Schema: pluginv1.Schema, ProviderID: manifest.ProviderID, Version: manifest.Version,
-		Status: pluginv1.StatusActive, ManifestSHA256: digest, GrantedPermissions: manifest.Permissions,
+		Status: pluginv1.StatusActive, ManifestSHA256: digest, ScanReportSHA256: strings.Repeat("a", 64), GrantedPermissions: manifest.Permissions,
 		GrantedResources: manifest.Resources, ApprovedBy: "admin", InstalledAt: now, UpdatedAt: now, Revision: 1,
 	}
 }

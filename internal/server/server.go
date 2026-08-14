@@ -20,6 +20,7 @@ import (
 	"github.com/good-fish-man/agent-runtime/internal/dispatcher"
 	"github.com/good-fish-man/agent-runtime/internal/eino"
 	"github.com/good-fish-man/agent-runtime/internal/memory"
+	"github.com/good-fish-man/agent-runtime/internal/provider"
 	"github.com/good-fish-man/agent-runtime/internal/research"
 	"github.com/good-fish-man/agent-runtime/internal/tools"
 	"github.com/good-fish-man/agent-runtime/internal/types"
@@ -168,6 +169,20 @@ func memoryScope(ctx *structpb.Struct) (sessionID, userID, agentID string) {
 	return get(constant.ContextKeySessionID), get(constant.ContextKeyUserID), get(constant.ContextKeyAgentID)
 }
 
+func providerTaskID(requestContext *structpb.Struct, requestID, traceID string) string {
+	if requestContext != nil {
+		for _, key := range []string{"task_id", "goal_id", "session_id"} {
+			if value, ok := requestContext.GetFields()[key]; ok && strings.TrimSpace(value.GetStringValue()) != "" {
+				return strings.TrimSpace(value.GetStringValue())
+			}
+		}
+	}
+	if strings.TrimSpace(requestID) != "" {
+		return strings.TrimSpace(requestID)
+	}
+	return traceID
+}
+
 // projectDir extracts the working directory for filesystem/shell tools from the
 // request context (context.project_dir). Returns "." when unset.
 func projectDir(ctx *structpb.Struct) string {
@@ -262,6 +277,7 @@ func (s *Server) Run(ctx context.Context, req *runtimev1.RunRequest) (*runtimev1
 		return nil, log.GRPCError(err, codes.Internal, "Server.Run.NewClient", "init model")
 	}
 	instruction, sessionID, userID, agentID := s.memoryInstruction(ctx, req.GetContext())
+	ctx = provider.WithInvocationScope(ctx, userID, providerTaskID(req.GetContext(), req.GetRequestId(), traceID))
 	disp := s.newRunDispatcher(client, req, instruction)
 	start := time.Now()
 	res, err := disp.Run(ctx, req.GetPrompt(), fromProtoMessages(req.GetMessages()))
@@ -298,6 +314,7 @@ func (s *Server) RunAgent(ctx context.Context, req *runtimev1.AgentRequest) (*ru
 		return nil, log.GRPCError(err, codes.Internal, "Server.RunAgent.NewClient", "init model")
 	}
 	instruction, sessionID, userID, agentID := s.memoryInstruction(ctx, req.GetContext())
+	ctx = provider.WithInvocationScope(ctx, userID, providerTaskID(req.GetContext(), req.GetRequestId(), traceID))
 	disp := s.newAgentDispatcher(client, req, instruction)
 	start := time.Now()
 	res, err := disp.Run(ctx, req.GetTask(), nil)
@@ -567,6 +584,7 @@ func (s *Server) RunStream(req *runtimev1.RunRequest, stream runtimev1.AgentRunt
 		return log.GRPCError(err, codes.Internal, "Server.RunStream.NewClient", "init model")
 	}
 	instruction, sessionID, userID, agentID := s.memoryInstruction(ctx, req.GetContext())
+	ctx = provider.WithInvocationScope(ctx, userID, providerTaskID(req.GetContext(), req.GetRequestId(), traceID))
 	disp := s.newRunDispatcher(client, req, instruction)
 	return log.WrapError(s.streamCompletion(ctx, traceID, req.GetPrompt(), fromProtoMessages(req.GetMessages()), mc, client, disp,
 		memScope{sessionID: sessionID, userID: userID, agentID: agentID, userInput: req.GetPrompt()}, stream.Send), "Server.RunStream")
@@ -591,6 +609,7 @@ func (s *Server) RunAgentStream(req *runtimev1.AgentRequest, stream runtimev1.Ag
 		return log.GRPCError(err, codes.Internal, "Server.RunAgentStream.NewClient", "init model")
 	}
 	instruction, sessionID, userID, agentID := s.memoryInstruction(ctx, req.GetContext())
+	ctx = provider.WithInvocationScope(ctx, userID, providerTaskID(req.GetContext(), req.GetRequestId(), traceID))
 	disp := s.newAgentDispatcher(client, req, instruction)
 	return log.WrapError(s.streamCompletion(ctx, traceID, req.GetTask(), nil, mc, client, disp,
 		memScope{sessionID: sessionID, userID: userID, agentID: agentID, userInput: req.GetTask()}, stream.Send), "Server.RunAgentStream")

@@ -42,7 +42,7 @@ func (t *providerTool) Info(context.Context) (*schema.ToolInfo, error) {
 }
 
 func (t *providerTool) ValidateInput(_ context.Context, input string) *toolimpl.ValidationResult {
-	if len(input) > t.binding.manifest.Resources.MaxInputBytes {
+	if len(input) > t.binding.entry.GrantedResources.MaxInputBytes {
 		return &toolimpl.ValidationResult{Valid: false, Message: "provider input exceeds resource budget", ErrorCode: 1}
 	}
 	var decoded any
