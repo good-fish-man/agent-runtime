@@ -23,6 +23,7 @@ import (
 	"github.com/good-fish-man/agent-runtime/internal/dispatcher"
 	"github.com/good-fish-man/agent-runtime/internal/eino"
 	"github.com/good-fish-man/agent-runtime/internal/memory"
+	"github.com/good-fish-man/agent-runtime/internal/provider"
 	"github.com/good-fish-man/agent-runtime/internal/research"
 	researchevidence "github.com/good-fish-man/agent-runtime/internal/research/evidence"
 	"github.com/good-fish-man/agent-runtime/internal/research/searchsystem"
@@ -57,6 +58,28 @@ func serve(configPath string, quit <-chan os.Signal) (bool, error) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return false, fmt.Errorf("load config: %w", err)
+	}
+	pluginConfig := provider.Config{
+		Enabled: cfg.Plugins.Enabled, Directory: cfg.Plugins.Dir, RegistryPath: cfg.Plugins.RegistryPath,
+		TrustStorePath: cfg.Plugins.TrustStorePath, AuditPath: cfg.Plugins.AuditPath,
+		RuntimeVersion: constant.Version, RequireSignature: cfg.Plugins.RequireSignature,
+	}
+	reloadPlugins := func(ctx context.Context) (any, error) {
+		_, report, loadErr := provider.LoadAndRegister(ctx, capability.GlobalRegistry, pluginConfig)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		return report, nil
+	}
+	pluginReportValue, pluginErr := reloadPlugins(context.Background())
+	pluginReport, _ := pluginReportValue.(provider.LoadReport)
+	if pluginErr != nil {
+		log.Errorf("external capability providers disabled: %v", pluginErr)
+	} else {
+		log.Infof("capability provider registry loaded active=%d rejected=%d", len(pluginReport.Loaded), len(pluginReport.Rejected))
+		for identity, reason := range pluginReport.Rejected {
+			log.Warnf("capability provider rejected provider=%s reason=%s", identity, reason)
+		}
 	}
 
 	var researchRunner research.Runner
@@ -158,7 +181,7 @@ func serve(configPath string, quit <-chan os.Signal) (bool, error) {
 	mux.HandleFunc(constant.RouteCapabilities, makeCapabilitiesHandler())
 	mux.HandleFunc("/generated/", tools.GeneratedImageHandler)
 	restartCh := make(chan struct{}, 1)
-	admin.NewHandler(configPath, cfg.Skills.ConfigPath, restartCh).Register(mux)
+	admin.NewHandler(configPath, cfg.Skills.ConfigPath, restartCh).WithPluginReload(reloadPlugins).Register(mux)
 
 	httpServer := &http.Server{Addr: cfg.Server.HTTPAddr, Handler: requestLogger(mux), ReadHeaderTimeout: 10 * time.Second}
 	log.Infof("HTTP gateway listening on %s", cfg.Server.HTTPAddr)

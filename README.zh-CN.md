@@ -28,6 +28,7 @@ Runtime 会输出类型化的研究进度、查询词、证据、置信度和最
 - 本地 Diffusers 图片生成和生成文件访问。
 - HTTP、gRPC、工具与模型调用之间的 Trace 传递和带源码位置的错误链。
 - 仅允许本机访问的配置、重启和本地模型生命周期管理接口。
+- 签名且版本不可变的 Capability Provider、失败即关闭的 Registry 授权、受限宿主执行和可追溯调用审计。
 
 ## 架构
 
@@ -147,6 +148,10 @@ skills:
   dir: "skills"
   config_path: "config/skills-config.yaml"
 
+plugins:
+  enabled: true
+  require_signature: true
+
 ```
 
 数据库启用时，长期记忆默认开启。Athena Launcher 会自动安装并配置 PostgreSQL；独立部署时还需要设置 `db.enabled: true` 并提供可连接的数据库。数据库不可用时，runtime 会记录连接错误并降级为无持久记忆模式，不会阻止基础对话服务启动。
@@ -166,6 +171,9 @@ skills:
 | `ATHENA_RESEARCH_CACHE_DIR` | 公开研究证据的持久化缓存目录 |
 | `ATHENA_RESEARCH_PROVIDERS` | Provider 白名单，使用逗号分隔（`web,github,wikipedia,arxiv,news`） |
 | `ATHENA_RESEARCH_MAX_QUERIES`、`ATHENA_RESEARCH_MAX_PAGES`、`ATHENA_RESEARCH_MAX_ROUNDS`、`ATHENA_RESEARCH_TIMEOUT_SEC` | 研究预算覆盖参数 |
+| `ATHENA_PLUGINS_ENABLED`、`ATHENA_PLUGINS_DIR` | 启用签名 Provider 加载器并设置不可变包目录 |
+| `ATHENA_PLUGIN_REGISTRY_PATH`、`ATHENA_PLUGIN_TRUST_STORE_PATH`、`ATHENA_PLUGIN_AUDIT_PATH` | Registry 授权、Ed25519 信任库和调用审计路径 |
+| `ATHENA_PLUGIN_REQUIRE_SIGNATURE` | 强制可信包签名，默认 `true` |
 | `research.model_planning`、`research.semantic_verification`、`research.advisor_timeout_sec`、`research.max_advisor_claims` | `config.yaml` 中的 V3 模型顾问配置 |
 | `ATHENA_GITHUB_TOKEN` 或 `GITHUB_TOKEN` | 可选 GitHub API Token，用于提高搜索限额 |
 | `SANDBOX_IMAGE` | 默认沙箱镜像 |
@@ -187,6 +195,20 @@ Tools 和 Skills 会根据当前描述与最近上下文进行筛选。文件工
 V3 可以让当前请求模型在剩余预算内补充查询，并对关键主张做语义核验。模型输出仍受来源 ID、查询预算、超时和白名单约束；非 JSON、超时或调用失败都会自动回退 V2。流式请求会显示一张持续更新的研究进度卡，Advisor 消耗的 token 也会计入最终用量。详见 [Research Agent v3](doc/research-agent-v3.md)。
 
 默认自适应预算最多允许 6 次 Provider 搜索、抓取 8 个网页、执行 3 轮研究和耗时 30 秒；来源数量、域名多样性、权威来源、专业来源要求和置信度足够时会提前结束。V2 已提供独立的公共网页、GitHub API、Wikipedia API、arXiv API 和 GDELT 新闻 Provider，并为每个 Provider 增加超时和熔断。新闻报告缓存 5 分钟，其他公开研究报告通过内存加磁盘缓存保存 1 小时。模型最终收到准确 URL、已排序来源、可追溯主张、未解决冲突、剩余缺口、停止原因和预算使用情况；网页原文仍会被限制长度并标记为不可信内容。
+
+### 签名 Capability Provider
+
+Runtime 只加载 v0.8 Provider Registry 中状态为 `ACTIVE` 的条目。每个条目
+必须指向不可变的 `provider_id/version` 目录，匹配记录的 SHA-256，通过可信
+Ed25519 公钥校验，兼容当前平台与 Runtime 版本，并且权限和资源都不能超过
+Registry 授权。注册过程具有事务性：任一 Capability 无效会回滚整个 Provider，
+不会影响内置 Capability 或其他 Provider。
+
+外部 Provider 不会直接收到 Runtime 凭据，也不能执行生成代码。网络请求由宿主
+代理，只允许精确授权域名，并阻止解析到私网地址或通过重定向逃逸；输入输出大小、
+超时与并发都受预算约束。每次调用会写入 JSONL 审计，记录 Provider/版本、
+Capability、Trace、权限快照、输入输出 Hash、耗时、结果与 Observation 引用。
+管理员只能通过本机接口 `POST /admin/plugins/reload` 重载 Registry。
 
 服务端联网研究只使用 `internet.search` 和 `internet.fetch`，搜索失败时不会打开用户的本地浏览器兜底。只有用户明确要求打开、导航、观察或操作可见页面时，Runtime 才会暴露本地 `browser.*` 能力。对于只有网站名称但没有准确网址的浏览器任务，Browser Runtime 可以把网址发现交给 Search System，再在同一个 Session 中继续原任务。遇到认证页面时切换到 `browser.login`，由用户自行完成密码、验证码、二次验证或扫码登录；账号密码和 Cookie 值不会作为工具参数传输。Athena Launcher 会安装原生浏览器 CLI；独立开发环境必须自行安装 `agent-browser` 或设置 `ATHENA_AGENT_BROWSER_BIN`。常见表达参见[浏览器命令手册](https://github.com/good-fish-man/athena-launcher/blob/main/docs/browser-command-guide.md#简体中文)。
 

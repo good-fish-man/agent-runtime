@@ -56,3 +56,15 @@ func TestDefaultSkillsDirIsConfigured(t *testing.T) {
 		t.Fatalf("default skills config must point at the runtime config directory")
 	}
 }
+
+func TestPluginDefaultsAreSignedAndAbsolute(t *testing.T) {
+	plugins := Default().Plugins
+	if !plugins.Enabled || !plugins.RequireSignature {
+		t.Fatalf("plugins must default to enabled and signed: %+v", plugins)
+	}
+	for _, path := range []string{plugins.Dir, plugins.RegistryPath, plugins.TrustStorePath, plugins.AuditPath} {
+		if !filepath.IsAbs(path) {
+			t.Fatalf("plugin path must be absolute: %s", path)
+		}
+	}
+}

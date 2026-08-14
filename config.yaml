@@ -48,3 +48,9 @@ research:
 skills:
   dir: "skills"
   config_path: "config/skills-config.yaml"
+
+# Packages are read from ~/.athena/plugins by default. Only ACTIVE Registry
+# entries with an exact digest and trusted Ed25519 signature are loaded.
+plugins:
+  enabled: true
+  require_signature: true

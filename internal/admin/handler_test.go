@@ -1,12 +1,29 @@
 package admin
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestPluginReloadIsLocalAndObservable(t *testing.T) {
+	mux := http.NewServeMux()
+	called := false
+	NewHandler("config.yaml", "skills.yaml", make(chan struct{}, 1)).WithPluginReload(func(context.Context) (any, error) {
+		called = true
+		return map[string]any{"loaded": []string{"com.example.echo@0.8.0"}}, nil
+	}).Register(mux)
+	req := httptest.NewRequest(http.MethodPost, "/admin/plugins/reload", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusOK || !called || !strings.Contains(res.Body.String(), "com.example.echo@0.8.0") {
+		t.Fatalf("reload response=%d called=%v body=%s", res.Code, called, res.Body.String())
+	}
+}
 
 func TestStatusReportsRuntimeOwnedPaths(t *testing.T) {
 	dir := t.TempDir()

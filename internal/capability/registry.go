@@ -23,15 +23,19 @@ const (
 
 // Definition is a provider-independent capability contract.
 type Definition struct {
-	ID          string            `json:"id" yaml:"id"`
-	Description string            `json:"description" yaml:"description"`
-	Input       map[string]string `json:"input,omitempty" yaml:"input,omitempty"`
-	Output      string            `json:"output,omitempty" yaml:"output,omitempty"`
-	ReadOnly    bool              `json:"read_only" yaml:"read_only"`
-	Risk        string            `json:"risk" yaml:"risk"`
-	Status      Status            `json:"status" yaml:"status"`
-	Provider    string            `json:"provider,omitempty" yaml:"provider,omitempty"`
-	Reason      string            `json:"reason,omitempty" yaml:"reason,omitempty"`
+	ID                  string            `json:"id" yaml:"id"`
+	Description         string            `json:"description" yaml:"description"`
+	Input               map[string]string `json:"input,omitempty" yaml:"input,omitempty"`
+	Output              string            `json:"output,omitempty" yaml:"output,omitempty"`
+	ReadOnly            bool              `json:"read_only" yaml:"read_only"`
+	Risk                string            `json:"risk" yaml:"risk"`
+	RiskFloor           string            `json:"risk_floor,omitempty" yaml:"risk_floor,omitempty"`
+	Status              Status            `json:"status" yaml:"status"`
+	Provider            string            `json:"provider,omitempty" yaml:"provider,omitempty"`
+	ProviderVersion     string            `json:"provider_version,omitempty" yaml:"provider_version,omitempty"`
+	Permissions         map[string]any    `json:"permissions,omitempty" yaml:"permissions,omitempty"`
+	ObservationContract string            `json:"observation_contract,omitempty" yaml:"observation_contract,omitempty"`
+	Reason              string            `json:"reason,omitempty" yaml:"reason,omitempty"`
 }
 
 type Factory func(basePath string) (tool.BaseTool, error)
@@ -39,6 +43,7 @@ type Factory func(basePath string) (tool.BaseTool, error)
 type registration struct {
 	definition Definition
 	factory    Factory
+	external   bool
 }
 
 type Registry struct {
@@ -53,6 +58,20 @@ func NewRegistry() *Registry {
 var GlobalRegistry = NewRegistry()
 
 func (r *Registry) Register(definition Definition, factory Factory) error {
+	return r.register(definition, factory, false)
+}
+
+// RegisterExternal registers a verified provider loaded from the private
+// plugin Registry. External entries are removable as one unit during a safe
+// reload; built-in registrations are never replaced.
+func (r *Registry) RegisterExternal(definition Definition, factory Factory) error {
+	if strings.TrimSpace(definition.Provider) == "" || strings.TrimSpace(definition.ProviderVersion) == "" {
+		return fmt.Errorf("external capability requires provider and provider version")
+	}
+	return r.register(definition, factory, true)
+}
+
+func (r *Registry) register(definition Definition, factory Factory, external bool) error {
 	definition.ID = strings.TrimSpace(definition.ID)
 	if definition.ID == "" {
 		return fmt.Errorf("capability id is required")
@@ -70,8 +89,31 @@ func (r *Registry) Register(definition Definition, factory Factory) error {
 	if _, exists := r.entries[definition.ID]; exists {
 		return fmt.Errorf("capability %s is already registered", definition.ID)
 	}
-	r.entries[definition.ID] = registration{definition: definition, factory: factory}
+	r.entries[definition.ID] = registration{definition: definition, factory: factory, external: external}
 	return nil
+}
+
+// RemoveExternal drops only dynamically loaded provider registrations. It is
+// used before config reload so disabled/revoked versions cannot remain live.
+func (r *Registry) RemoveExternal() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, entry := range r.entries {
+		if entry.external {
+			delete(r.entries, id)
+		}
+	}
+}
+
+// RemoveExternalProvider rolls back a partially registered provider package.
+func (r *Registry) RemoveExternalProvider(provider, version string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, entry := range r.entries {
+		if entry.external && entry.definition.Provider == provider && entry.definition.ProviderVersion == version {
+			delete(r.entries, id)
+		}
+	}
 }
 
 func (r *Registry) Get(id string) (Definition, bool) {

@@ -24,6 +24,7 @@ type Config struct {
 	Research ResearchConfig `yaml:"research"`
 	Sandbox  SandboxConfig  `yaml:"sandbox"`
 	Skills   SkillsConfig   `yaml:"skills"`
+	Plugins  PluginsConfig  `yaml:"plugins"`
 }
 
 // ServerConfig holds listen addresses and default model settings.
@@ -103,6 +104,16 @@ type SkillsConfig struct {
 	GlobalDir  string `yaml:"global_dir"`  // additional skills directory to scan
 }
 
+// PluginsConfig controls the fail-closed signed Capability Provider loader.
+type PluginsConfig struct {
+	Enabled          bool   `yaml:"enabled"`
+	Dir              string `yaml:"dir"`
+	RegistryPath     string `yaml:"registry_path"`
+	TrustStorePath   string `yaml:"trust_store_path"`
+	AuditPath        string `yaml:"audit_path"`
+	RequireSignature bool   `yaml:"require_signature"`
+}
+
 // Default returns a Config populated with sane defaults.
 func Default() Config {
 	return Config{
@@ -154,7 +165,8 @@ func Default() Config {
 			Workdir:      constant.SandboxWorkdir,
 			TimeoutMs:    constant.DefaultSandboxTimeoutMs,
 		},
-		Skills: SkillsConfig{Dir: constant.DirSkills, ConfigPath: constant.SkillsConfigRelPath},
+		Skills:  SkillsConfig{Dir: constant.DirSkills, ConfigPath: constant.SkillsConfigRelPath},
+		Plugins: defaultPluginsConfig(),
 	}
 }
 
@@ -202,6 +214,11 @@ func resolveSkillPaths(cfg *Config, configPath string) {
 			*target = filepath.Clean(filepath.Join(baseDir, *target))
 		}
 	}
+	for _, target := range []*string{&cfg.Plugins.Dir, &cfg.Plugins.RegistryPath, &cfg.Plugins.TrustStorePath, &cfg.Plugins.AuditPath} {
+		if *target != "" && !filepath.IsAbs(*target) {
+			*target = filepath.Clean(filepath.Join(baseDir, *target))
+		}
+	}
 	if cfg.Research.CacheDir != "" && !filepath.IsAbs(cfg.Research.CacheDir) {
 		cfg.Research.CacheDir = filepath.Clean(filepath.Join(baseDir, cfg.Research.CacheDir))
 	}
@@ -237,6 +254,20 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv(constant.EnvGlobalSkillsDir); v != "" {
 		cfg.Skills.GlobalDir = v
 	}
+	applyBoolEnv(constant.EnvPluginsEnabled, &cfg.Plugins.Enabled)
+	applyBoolEnv(constant.EnvPluginRequireSignature, &cfg.Plugins.RequireSignature)
+	if v := os.Getenv(constant.EnvPluginsDir); v != "" {
+		cfg.Plugins.Dir = v
+	}
+	if v := os.Getenv(constant.EnvPluginRegistryPath); v != "" {
+		cfg.Plugins.RegistryPath = v
+	}
+	if v := os.Getenv(constant.EnvPluginTrustStorePath); v != "" {
+		cfg.Plugins.TrustStorePath = v
+	}
+	if v := os.Getenv(constant.EnvPluginAuditPath); v != "" {
+		cfg.Plugins.AuditPath = v
+	}
 	if v := os.Getenv(constant.EnvResearchCacheDir); v != "" {
 		cfg.Research.CacheDir = v
 	}
@@ -247,6 +278,21 @@ func applyEnvOverrides(cfg *Config) {
 	applyPositiveIntEnv(constant.EnvResearchMaxPages, &cfg.Research.MaxPages)
 	applyPositiveIntEnv(constant.EnvResearchMaxRounds, &cfg.Research.MaxRounds)
 	applyPositiveIntEnv(constant.EnvResearchTimeoutSec, &cfg.Research.TimeoutSec)
+}
+
+func defaultPluginsConfig() PluginsConfig {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		home = filepath.Join(os.TempDir(), constant.DefaultAthenaTempDirName)
+	} else {
+		home = filepath.Join(home, constant.DefaultAthenaHomeDirName)
+	}
+	dir := filepath.Join(home, "plugins")
+	return PluginsConfig{
+		Enabled: true, Dir: dir, RegistryPath: filepath.Join(dir, "registry.json"),
+		TrustStorePath: filepath.Join(dir, "trust-store.json"),
+		AuditPath:      filepath.Join(home, "logs", "plugin-invocations.jsonl"), RequireSignature: true,
+	}
 }
 
 func defaultResearchCacheDir() string {
@@ -270,6 +316,14 @@ func splitCSV(value string) []string {
 func applyPositiveIntEnv(name string, target *int) {
 	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
 		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
+			*target = parsed
+		}
+	}
+}
+
+func applyBoolEnv(name string, target *bool) {
+	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+		if parsed, err := strconv.ParseBool(value); err == nil {
 			*target = parsed
 		}
 	}

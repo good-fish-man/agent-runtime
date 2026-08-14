@@ -60,6 +60,12 @@ const (
 	EnvResearchTimeoutSec       = "ATHENA_RESEARCH_TIMEOUT_SEC"
 	EnvResearchGitHubToken      = "ATHENA_GITHUB_TOKEN"
 	EnvGitHubToken              = "GITHUB_TOKEN"
+	EnvPluginsEnabled           = "ATHENA_PLUGINS_ENABLED"
+	EnvPluginsDir               = "ATHENA_PLUGINS_DIR"
+	EnvPluginRegistryPath       = "ATHENA_PLUGIN_REGISTRY_PATH"
+	EnvPluginTrustStorePath     = "ATHENA_PLUGIN_TRUST_STORE_PATH"
+	EnvPluginAuditPath          = "ATHENA_PLUGIN_AUDIT_PATH"
+	EnvPluginRequireSignature   = "ATHENA_PLUGIN_REQUIRE_SIGNATURE"
 	// EnvConfigPath points to the YAML config file (db + memory sections).
 	EnvConfigPath = "AGENT_RUNTIME_CONFIG"
 )
@@ -102,7 +108,7 @@ const (
 
 // Runtime defaults.
 const (
-	Version                    = "0.2.0"
+	Version                    = "0.8.0"
 	DefaultMaxIterations       = 20
 	DefaultParallelToolWorkers = 8
 )

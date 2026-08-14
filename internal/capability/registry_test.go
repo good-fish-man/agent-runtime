@@ -52,6 +52,23 @@ func TestRegistryRejectsDuplicateIDs(t *testing.T) {
 	}
 }
 
+func TestExternalCapabilitiesCanBeReloadedWithoutTouchingBuiltins(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.Register(Definition{ID: "builtin.read", Provider: "builtin"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.RegisterExternal(Definition{ID: "com.example.echo.read", Provider: "com.example.echo", ProviderVersion: "0.8.0"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	registry.RemoveExternal()
+	if _, ok := registry.Get("com.example.echo.read"); ok {
+		t.Fatal("external capability survived reload reset")
+	}
+	if _, ok := registry.Get("builtin.read"); !ok {
+		t.Fatal("built-in capability was removed")
+	}
+}
+
 func TestIsClientBound(t *testing.T) {
 	clientBound := []string{BrowserTask, BrowserOpen, BrowserSearch, BrowserClose, DesktopAction}
 	for _, id := range clientBound {

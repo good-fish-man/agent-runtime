@@ -28,6 +28,8 @@ The Runtime emits typed research progress, query, evidence, confidence, and fina
 - Local Diffusers image generation and generated-file serving.
 - Trace propagation and source-aware error chains across HTTP, gRPC, tools, and models.
 - Local-only administration endpoints for configuration, restart, and local-model lifecycle.
+- Signed, versioned Capability Providers with fail-closed Registry grants,
+  bounded host-mediated execution, and provenance-rich invocation audits.
 
 ## Architecture
 
@@ -147,6 +149,10 @@ skills:
   dir: "skills"
   config_path: "config/skills-config.yaml"
 
+plugins:
+  enabled: true
+  require_signature: true
+
 ```
 
 Memory is enabled by default when the database is enabled. Athena Launcher installs and configures PostgreSQL automatically; standalone deployments must also set `db.enabled: true` and provide a reachable database. If the database is unavailable, the runtime continues without persistent memory and logs the connection error.
@@ -166,6 +172,9 @@ Environment overrides:
 | `ATHENA_RESEARCH_CACHE_DIR` | Persistent public research-evidence cache directory |
 | `ATHENA_RESEARCH_PROVIDERS` | Comma-separated Provider allowlist (`web,github,wikipedia,arxiv,news`) |
 | `ATHENA_RESEARCH_MAX_QUERIES`, `ATHENA_RESEARCH_MAX_PAGES`, `ATHENA_RESEARCH_MAX_ROUNDS`, `ATHENA_RESEARCH_TIMEOUT_SEC` | Research budget overrides |
+| `ATHENA_PLUGINS_ENABLED`, `ATHENA_PLUGINS_DIR` | Enable the signed Provider loader and set the immutable package root |
+| `ATHENA_PLUGIN_REGISTRY_PATH`, `ATHENA_PLUGIN_TRUST_STORE_PATH`, `ATHENA_PLUGIN_AUDIT_PATH` | Registry grants, trusted Ed25519 keys, and invocation audit paths |
+| `ATHENA_PLUGIN_REQUIRE_SIGNATURE` | Require a trusted package signature; defaults to `true` |
 | `research.model_planning`, `research.semantic_verification`, `research.advisor_timeout_sec`, `research.max_advisor_claims` | V3 model-advisor settings in `config.yaml` |
 | `ATHENA_GITHUB_TOKEN` or `GITHUB_TOKEN` | Optional GitHub API token for a higher search rate limit |
 | `SANDBOX_IMAGE` | Default sandbox image |
@@ -187,6 +196,23 @@ Research-heavy requests do not rely only on the model deciding whether to browse
 V3 optionally asks the current request model to fill remaining query gaps and semantically review the strongest claims. All model output is constrained by code-owned source IDs, query budgets, timeouts, and allowlists; malformed or failed advice falls back to V2. Streaming requests expose one live research progress card, and advisor token usage is included in the final usage totals. See [Research Agent v3](doc/research-agent-v3.md).
 
 The default adaptive budget permits up to 6 Provider searches, 8 page fetches, 3 research rounds, and 30 seconds. Work stops early when source count, domain diversity, authority, specialized-source requirements, and confidence are sufficient. V2 has independent public-web, GitHub API, Wikipedia API, arXiv API, and GDELT news Providers with per-Provider timeout and circuit breaking. Recent news reports are cached for 5 minutes and other public research reports for 1 hour in a memory-plus-disk cache. The model receives exact URLs, ranked sources, attributable claims, unresolved conflicts, remaining gaps, stop reason, and budget usage; raw page text remains bounded and explicitly untrusted.
+
+### Signed Capability Providers
+
+Runtime loads only `ACTIVE` entries from the v0.8 Provider Registry. Every
+entry must resolve to an immutable `provider_id/version` directory, match its
+recorded SHA-256, verify against a trusted Ed25519 key, support the current
+platform/runtime version, and stay within the Registry's permission and resource
+grants. Registration is transactional: one invalid capability rolls back the
+whole Provider without disturbing built-in capabilities or other Providers.
+
+External Providers never receive Runtime credentials directly and cannot run
+generated code. Network requests are host-mediated, restricted to exact granted
+domains, protected against private-network resolution and redirect escape, and
+bounded by input/output size, timeout, and concurrency. Each invocation emits a
+JSONL audit record containing Provider/version, capability, trace, permission
+snapshot, hashes, timing, outcome, and Observation reference. Administrators can
+reload the Registry through the loopback-only `POST /admin/plugins/reload`.
 
 Server-side research uses `internet.search` and `internet.fetch` and never opens the user's local browser as a fallback. Local `browser.*` capabilities are exposed only when the user explicitly asks to open, navigate, observe, or interact with a visible page. An unknown named site may hand off URL discovery to Search System, then resume the original browser task in the same session. Authenticated pages switch to `browser.login`, where the user completes password, CAPTCHA, 2FA, or QR login; credentials and cookie values are never tool arguments. Athena Launcher installs the native browser CLI; standalone development must install `agent-browser` or set `ATHENA_AGENT_BROWSER_BIN`. See [Common Browser Commands](https://github.com/good-fish-man/athena-launcher/blob/main/docs/browser-command-guide.md).
 

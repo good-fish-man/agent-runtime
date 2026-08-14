@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net"
@@ -18,9 +19,15 @@ import (
 )
 
 type Handler struct {
-	configPath string
-	skillsPath string
-	restart    chan<- struct{}
+	configPath   string
+	skillsPath   string
+	restart      chan<- struct{}
+	pluginReload func(context.Context) (any, error)
+}
+
+func (h *Handler) WithPluginReload(reload func(context.Context) (any, error)) *Handler {
+	h.pluginReload = reload
+	return h
 }
 
 func NewHandler(configPath, skillsPath string, restart chan<- struct{}) *Handler {
@@ -33,6 +40,24 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/config/skills", h.localOnly(h.skillsConfig))
 	mux.HandleFunc("/admin/restart", h.localOnly(h.restartService))
 	mux.HandleFunc("/admin/local-model/lifecycle", h.localOnly(h.localModelLifecycle))
+	mux.HandleFunc("/admin/plugins/reload", h.localOnly(h.reloadPlugins))
+}
+
+func (h *Handler) reloadPlugins(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if h.pluginReload == nil {
+		writeError(w, http.StatusServiceUnavailable, "plugin reload is unavailable")
+		return
+	}
+	report, err := h.pluginReload(r.Context())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeOK(w, report)
 }
 
 func (h *Handler) localModelLifecycle(w http.ResponseWriter, r *http.Request) {
