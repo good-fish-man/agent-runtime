@@ -18,13 +18,14 @@ import (
 
 // Config is the root configuration.
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	DB       DBConfig       `yaml:"db"`
-	Memory   MemoryConfig   `yaml:"memory"`
-	Research ResearchConfig `yaml:"research"`
-	Sandbox  SandboxConfig  `yaml:"sandbox"`
-	Skills   SkillsConfig   `yaml:"skills"`
-	Plugins  PluginsConfig  `yaml:"plugins"`
+	Server     ServerConfig     `yaml:"server"`
+	DB         DBConfig         `yaml:"db"`
+	Memory     MemoryConfig     `yaml:"memory"`
+	Research   ResearchConfig   `yaml:"research"`
+	Sandbox    SandboxConfig    `yaml:"sandbox"`
+	Skills     SkillsConfig     `yaml:"skills"`
+	Plugins    PluginsConfig    `yaml:"plugins"`
+	Operations OperationsConfig `yaml:"operations"`
 }
 
 // ServerConfig holds listen addresses and default model settings.
@@ -114,6 +115,14 @@ type PluginsConfig struct {
 	RequireSignature bool   `yaml:"require_signature"`
 }
 
+// OperationsConfig bounds concurrent work and request lifetime.
+type OperationsConfig struct {
+	MaxInflight       int `yaml:"max_inflight"`
+	MaxQueue          int `yaml:"max_queue"`
+	AdmissionWaitMS   int `yaml:"admission_wait_ms"`
+	RequestTimeoutSec int `yaml:"request_timeout_sec"`
+}
+
 // Default returns a Config populated with sane defaults.
 func Default() Config {
 	return Config{
@@ -165,8 +174,9 @@ func Default() Config {
 			Workdir:      constant.SandboxWorkdir,
 			TimeoutMs:    constant.DefaultSandboxTimeoutMs,
 		},
-		Skills:  SkillsConfig{Dir: constant.DirSkills, ConfigPath: constant.SkillsConfigRelPath},
-		Plugins: defaultPluginsConfig(),
+		Skills:     SkillsConfig{Dir: constant.DirSkills, ConfigPath: constant.SkillsConfigRelPath},
+		Plugins:    defaultPluginsConfig(),
+		Operations: OperationsConfig{MaxInflight: 32, MaxQueue: 64, AdmissionWaitMS: 2000, RequestTimeoutSec: 300},
 	}
 }
 
@@ -268,6 +278,10 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv(constant.EnvPluginAuditPath); v != "" {
 		cfg.Plugins.AuditPath = v
 	}
+	applyPositiveIntEnv(constant.EnvOperationsMaxInflight, &cfg.Operations.MaxInflight)
+	applyNonNegativeIntEnv(constant.EnvOperationsMaxQueue, &cfg.Operations.MaxQueue)
+	applyPositiveIntEnv(constant.EnvOperationsAdmissionWaitMS, &cfg.Operations.AdmissionWaitMS)
+	applyPositiveIntEnv(constant.EnvOperationsRequestTimeoutSec, &cfg.Operations.RequestTimeoutSec)
 	if v := os.Getenv(constant.EnvResearchCacheDir); v != "" {
 		cfg.Research.CacheDir = v
 	}
@@ -316,6 +330,14 @@ func splitCSV(value string) []string {
 func applyPositiveIntEnv(name string, target *int) {
 	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
 		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
+			*target = parsed
+		}
+	}
+}
+
+func applyNonNegativeIntEnv(name string, target *int) {
+	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil && parsed >= 0 {
 			*target = parsed
 		}
 	}

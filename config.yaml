@@ -54,3 +54,11 @@ skills:
 plugins:
   enabled: true
   require_signature: true
+
+# Production admission control. Work beyond max_inflight waits in a bounded
+# queue and is rejected instead of exhausting the process.
+operations:
+  max_inflight: 32
+  max_queue: 64
+  admission_wait_ms: 2000
+  request_timeout_sec: 300

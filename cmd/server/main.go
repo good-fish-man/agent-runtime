@@ -23,6 +23,7 @@ import (
 	"github.com/good-fish-man/agent-runtime/internal/dispatcher"
 	"github.com/good-fish-man/agent-runtime/internal/eino"
 	"github.com/good-fish-man/agent-runtime/internal/memory"
+	"github.com/good-fish-man/agent-runtime/internal/operations"
 	"github.com/good-fish-man/agent-runtime/internal/provider"
 	"github.com/good-fish-man/agent-runtime/internal/research"
 	researchevidence "github.com/good-fish-man/agent-runtime/internal/research/evidence"
@@ -156,10 +157,15 @@ func serve(configPath string, quit <-chan os.Signal) (bool, error) {
 	}
 
 	srv := server.New(srvCfg)
+	gate := operations.NewGate(operations.Config{
+		MaxInflight: cfg.Operations.MaxInflight, MaxQueue: cfg.Operations.MaxQueue,
+		AdmissionWait:  time.Duration(cfg.Operations.AdmissionWaitMS) * time.Millisecond,
+		RequestTimeout: time.Duration(cfg.Operations.RequestTimeoutSec) * time.Second,
+	}, runtimeInstanceID())
 
 	grpcServer := grpc.NewServer(
-		grpc.UnaryInterceptor(server.UnaryTraceInterceptor()),
-		grpc.StreamInterceptor(server.StreamTraceInterceptor()),
+		grpc.ChainUnaryInterceptor(server.UnaryTraceInterceptor(), gate.UnaryInterceptor()),
+		grpc.ChainStreamInterceptor(server.StreamTraceInterceptor(), gate.StreamInterceptor()),
 	)
 	runtimev1.RegisterAgentRuntimeServer(grpcServer, srv)
 
@@ -176,8 +182,10 @@ func serve(configPath string, quit <-chan os.Signal) (bool, error) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(constant.RouteHealth, makeHealthHandler(srv))
-	mux.HandleFunc(constant.RouteRun, makeRunHandler(srv))
-	mux.HandleFunc(constant.RouteAgent, makeAgentHandler(srv))
+	mux.HandleFunc(constant.RouteReady, makeOperationsHealthHandler(gate, false))
+	mux.HandleFunc(constant.RouteMetrics, makeOperationsHealthHandler(gate, true))
+	mux.Handle(constant.RouteRun, gate.WrapHTTP(makeRunHandler(srv)))
+	mux.Handle(constant.RouteAgent, gate.WrapHTTP(makeAgentHandler(srv)))
 	mux.HandleFunc(constant.RouteCapabilities, makeCapabilitiesHandler())
 	mux.HandleFunc("/generated/", tools.GeneratedImageHandler)
 	restartCh := make(chan struct{}, 1)
@@ -203,6 +211,7 @@ func serve(configPath string, quit <-chan os.Signal) (bool, error) {
 	}
 
 	log.Infof("shutting down agent-runtime...")
+	gate.Drain()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := httpServer.Shutdown(ctx); err != nil {
@@ -219,6 +228,35 @@ func serve(configPath string, quit <-chan os.Signal) (bool, error) {
 		grpcServer.Stop()
 	}
 	return restart, nil
+}
+
+func runtimeInstanceID() string {
+	host, _ := os.Hostname()
+	if host == "" {
+		host = "localhost"
+	}
+	return fmt.Sprintf("%s-%d", host, os.Getpid())
+}
+
+func makeOperationsHealthHandler(gate *operations.Gate, includeSLO bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		health := gate.Health(constant.Version)
+		w.Header().Set("Content-Type", "application/json")
+		if health.Status == "UNHEALTHY" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+		payload := map[string]any{"health": health}
+		if includeSLO {
+			payload["slo"] = gate.SLO()
+		}
+		if err := json.NewEncoder(w).Encode(payload); err != nil {
+			writeError(w, fmt.Errorf("encode operations health: %w", err))
+		}
+	}
 }
 
 var (
