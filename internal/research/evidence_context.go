@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/good-fish-man/athena-protocol/sdk/safety"
 )
 
 // Evidence is the bounded, structured research result exposed to Dispatcher.
@@ -114,7 +116,11 @@ func (e Evidence) ContextSection() string {
 			fmt.Fprintf(&out, "Search snippet: %s\n", sanitizeLine(source.Snippet))
 		}
 		if source.Content != "" {
-			fmt.Fprintf(&out, "Page content:\n%s\n", source.Content)
+			encoded, report, err := safety.MarshalTextPayload(source.Content, 32*1024)
+			if err == nil {
+				fmt.Fprintf(&out, "Page content envelope (risk=%s indicators=%s):\n%s\n",
+					report.Risk, strings.Join(report.Indicators, ","), encoded)
+			}
 		}
 	}
 	if len(e.Claims) > 0 {
@@ -230,7 +236,8 @@ func containsHan(value string) bool {
 }
 
 func sanitizeLine(value string) string {
-	return strings.Join(strings.Fields(value), " ")
+	normalized, _ := safety.AnalyzeText(value, 4096)
+	return strings.Join(strings.Fields(normalized), " ")
 }
 
 func truncate(value string, limit int) string {

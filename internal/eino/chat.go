@@ -19,6 +19,7 @@ import (
 	"github.com/good-fish-man/agent-runtime/internal/capability"
 	"github.com/good-fish-man/agent-runtime/internal/constant"
 	"github.com/good-fish-man/agent-runtime/internal/tools"
+	"github.com/good-fish-man/athena-protocol/sdk/safety"
 	log "github.com/good-fish-man/logx"
 
 	"github.com/cloudwego/eino-ext/components/model/openai"
@@ -576,9 +577,50 @@ func buildAgentTools(p RunParams) []tool.BaseTool {
 	}
 	agentTools = append(agentTools, p.ExtraTools...)
 	for i, agentTool := range agentTools {
-		agentTools[i] = tools.TraceTool(agentTool)
+		agentTools[i] = wrapUntrustedToolResult(tools.TraceTool(agentTool))
 	}
 	return agentTools
+}
+
+// untrustedToolResult keeps executable Action envelopes untouched while
+// wrapping every model-facing external result in a data-only trust boundary.
+type untrustedToolResult struct {
+	tool      tool.BaseTool
+	invokable tool.InvokableTool
+}
+
+func wrapUntrustedToolResult(provider tool.BaseTool) tool.BaseTool {
+	invokable, ok := provider.(tool.InvokableTool)
+	if !ok {
+		return provider
+	}
+	return &untrustedToolResult{tool: provider, invokable: invokable}
+}
+
+func (t *untrustedToolResult) Info(ctx context.Context) (*schema.ToolInfo, error) {
+	return t.tool.Info(ctx)
+}
+
+func (t *untrustedToolResult) InvokableRun(ctx context.Context, input string, opts ...tool.Option) (string, error) {
+	output, err := t.invokable.InvokableRun(ctx, input, opts...)
+	if err != nil || safety.IsEnvelope(output) {
+		return output, err
+	}
+	if _, ok := actionprotocol.Parse(output); ok {
+		return output, nil
+	}
+	info, infoErr := t.tool.Info(ctx)
+	if infoErr != nil {
+		return "", log.WrapError(infoErr, "eino.untrustedToolResult.Info")
+	}
+	if info != nil && isUserVisibleToolName(info.Name) {
+		return output, nil
+	}
+	encoded, _, encodeErr := safety.MarshalTextPayload(output, safety.DefaultMaxRunes)
+	if encodeErr != nil {
+		return "", log.WrapError(encodeErr, "eino.untrustedToolResult.Marshal")
+	}
+	return encoded, nil
 }
 
 func mergeResult(dst, src *Result) {

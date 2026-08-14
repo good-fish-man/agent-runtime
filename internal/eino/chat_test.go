@@ -2,6 +2,7 @@ package eino
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/good-fish-man/agent-runtime/internal/constant"
 	"github.com/good-fish-man/agent-runtime/internal/tools"
+	"github.com/good-fish-man/athena-protocol/sdk/safety"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
@@ -309,8 +311,8 @@ func TestExecuteToolCallsAppendsObservationMessages(t *testing.T) {
 	if msg.Role != schema.Tool || msg.ToolName != fakeTool.name || msg.ToolCallID != "call-search" {
 		t.Fatalf("tool message metadata = %+v", msg)
 	}
-	if msg.Content != fakeTool.output {
-		t.Fatalf("tool message content = %q", msg.Content)
+	if payload := toolEnvelopeData(t, msg.Content); payload != fakeTool.output {
+		t.Fatalf("tool message data = %q, envelope = %q", payload, msg.Content)
 	}
 }
 
@@ -398,8 +400,24 @@ func TestExecuteToolCallsRunsReadOnlyCapabilitiesWithBoundedConcurrency(t *testi
 		t.Fatalf("peak concurrency = %d, want 2..%d", peak, constant.DefaultParallelToolWorkers)
 	}
 	for i, message := range result.Messages {
-		if message.ToolCallID != calls[i].ID || message.Content != calls[i].Function.Arguments {
+		if message.ToolCallID != calls[i].ID || toolEnvelopeData(t, message.Content) != calls[i].Function.Arguments {
 			t.Fatalf("message[%d] = %+v, want call %s", i, message, calls[i].ID)
 		}
 	}
+}
+
+func toolEnvelopeData(t *testing.T, content string) string {
+	t.Helper()
+	var envelope safety.Envelope
+	if err := json.Unmarshal([]byte(content), &envelope); err != nil {
+		t.Fatalf("decode tool trust envelope: %v", err)
+	}
+	if envelope.Schema != safety.EnvelopeSchema || envelope.Trust != safety.TrustExternal {
+		t.Fatalf("invalid tool trust envelope: %+v", envelope)
+	}
+	encoded, err := json.Marshal(envelope.Data)
+	if err != nil {
+		t.Fatalf("encode tool envelope data: %v", err)
+	}
+	return string(encoded)
 }
