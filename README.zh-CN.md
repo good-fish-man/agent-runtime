@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | [Research Agent v3](doc/research-agent-v3.md) | [Research Agent v2](doc/research-agent-v2.md)
 
+GA 指南：[Personal Agent OS 1.0 Runtime](doc/personal-agent-os-ga-v1.0.zh-CN.md) | [English](doc/personal-agent-os-ga-v1.0.md)
+
 架构设计：[Agent OS 分版本落地计划 v0.2-v1.0](doc/athena-agent-os-version-roadmap-v0.2-v1.0.zh-CN.md) | [Agent OS v0.2 详细架构](doc/agent-os-architecture-plan-v0.2.zh-CN.md) | [v0.2 跨仓库兼容矩阵](doc/v0.2-compatibility-matrix.zh-CN.md) | [v0.2 发布就绪报告](doc/v0.2-release-readiness.zh-CN.md) | [Athena Agent Architecture v2](doc/architecture-v2.md) | [Personal AI Operating System Specification v1.0](doc/personal-ai-os-spec-v1.md)
 
 浏览器使用：[常见浏览器命令](https://github.com/good-fish-man/athena-launcher/blob/main/docs/browser-command-guide.md#简体中文)

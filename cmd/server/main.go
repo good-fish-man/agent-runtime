@@ -25,6 +25,7 @@ import (
 	"github.com/good-fish-man/agent-runtime/internal/memory"
 	"github.com/good-fish-man/agent-runtime/internal/operations"
 	"github.com/good-fish-man/agent-runtime/internal/provider"
+	"github.com/good-fish-man/agent-runtime/internal/readiness"
 	"github.com/good-fish-man/agent-runtime/internal/research"
 	researchevidence "github.com/good-fish-man/agent-runtime/internal/research/evidence"
 	"github.com/good-fish-man/agent-runtime/internal/research/searchsystem"
@@ -183,6 +184,11 @@ func serve(configPath string, quit <-chan os.Signal) (bool, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc(constant.RouteHealth, makeHealthHandler(srv))
 	mux.HandleFunc(constant.RouteReady, makeOperationsHealthHandler(gate, false))
+	mux.HandleFunc(constant.RouteGAReadiness, makeGAReadinessHandler(gate, readiness.Config{
+		Version: constant.Version, InstanceID: runtimeInstanceID(), PluginsEnabled: cfg.Plugins.Enabled,
+		PluginRequireSignature: cfg.Plugins.RequireSignature, PluginTrustStorePath: cfg.Plugins.TrustStorePath,
+		MemoryEnabled: cfg.Memory.Enabled, DatabaseEnabled: cfg.DB.Enabled,
+	}))
 	mux.HandleFunc(constant.RouteMetrics, makeOperationsHealthHandler(gate, true))
 	mux.Handle(constant.RouteRun, gate.WrapHTTP(makeRunHandler(srv)))
 	mux.Handle(constant.RouteAgent, gate.WrapHTTP(makeAgentHandler(srv)))
@@ -255,6 +261,25 @@ func makeOperationsHealthHandler(gate *operations.Gate, includeSLO bool) http.Ha
 		}
 		if err := json.NewEncoder(w).Encode(payload); err != nil {
 			writeError(w, fmt.Errorf("encode operations health: %w", err))
+		}
+	}
+}
+
+func makeGAReadinessHandler(gate *operations.Gate, cfg readiness.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		report := readiness.Build(gate, cfg)
+		if err := readiness.Validate(report); err != nil {
+			writeError(w, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(readiness.HTTPStatus(report))
+		if err := json.NewEncoder(w).Encode(report); err != nil {
+			log.Errorf("encode GA readiness response: %v", err)
 		}
 	}
 }

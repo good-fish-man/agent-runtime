@@ -98,6 +98,7 @@ const (
 	RouteGenerated            = "/generated"
 	RouteCapabilities         = "/capabilities"
 	RouteReady                = "/readyz"
+	RouteGAReadiness          = "/readiness"
 	RouteMetrics              = "/metrics"
 	HeaderTraceID             = "X-Trace-Id"
 	HeaderRequestID           = "X-Request-Id"
@@ -114,7 +115,7 @@ const (
 
 // Runtime defaults.
 const (
-	Version                    = "0.9.0"
+	Version                    = "1.0.0"
 	DefaultMaxIterations       = 20
 	DefaultParallelToolWorkers = 8
 )
