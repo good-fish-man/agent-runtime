@@ -188,23 +188,7 @@ func NewClient(ctx context.Context, cfg ModelConfig) (*Client, error) {
 	if err := prepareLocalModelRuntime(ctx, &cfg); err != nil {
 		return nil, log.WrapError(err, "eino.NewClient.prepareLocalModelRuntime")
 	}
-	oc := &openai.ChatModelConfig{
-		APIKey:  ExpandEnv(cfg.APIKey),
-		Model:   cfg.Name,
-		BaseURL: ExpandEnv(cfg.APIBase),
-	}
-	if cfg.Temperature > 0 {
-		t := float32(cfg.Temperature)
-		oc.Temperature = &t
-	}
-	if cfg.MaxTokens > 0 {
-		mt := cfg.MaxTokens
-		oc.MaxTokens = &mt
-	}
-	if cfg.TopP > 0 {
-		p := float32(cfg.TopP)
-		oc.TopP = &p
-	}
+	oc := buildOpenAIChatModelConfig(cfg)
 	cm, err := openai.NewChatModel(ctx, oc)
 	if err != nil {
 		return nil, log.WrapError(err, "eino.NewClient.createChatModel")
