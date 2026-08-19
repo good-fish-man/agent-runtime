@@ -24,6 +24,7 @@ import (
 	"github.com/good-fish-man/agent-runtime/internal/prompt"
 	"github.com/good-fish-man/agent-runtime/internal/research"
 	athenarouter "github.com/good-fish-man/agent-runtime/internal/router"
+	"github.com/good-fish-man/agent-runtime/internal/specialist"
 	"github.com/good-fish-man/agent-runtime/internal/types"
 	log "github.com/good-fish-man/logx"
 
@@ -68,6 +69,8 @@ type Dispatcher struct {
 	researchContext    string
 	researchEvidence   research.Evidence
 	researchProgress   func(research.Progress) error
+	specialist         *specialist.Envelope
+	specialistError    error
 }
 
 // New builds a Dispatcher for req. memInstruction is an optional memory block
@@ -92,6 +95,10 @@ func New(client *eino.Client, req *types.RunRequest, workingDir, memInstruction 
 		cfg:              cfg,
 		researchExecutor: researchRunner,
 	}
+	d.specialist, d.specialistError = specialist.ParseContext(req.Context)
+	if d.specialistError == nil && d.specialist != nil {
+		req.Capabilities, d.specialistError = d.specialist.RestrictCapabilities(req.Capabilities)
+	}
 	d.skillsDir, d.availableSkills = d.discoverSkills()
 	d.compact = d.buildCompactService()
 	return d
@@ -105,6 +112,9 @@ func (d *Dispatcher) SetResearchProgressHandler(handler func(research.Progress) 
 
 // Run performs a non-streaming orchestrated completion.
 func (d *Dispatcher) Run(ctx context.Context, userPrompt string, msgs []eino.ChatMessage) (*eino.Result, error) {
+	if d.specialistError != nil {
+		return nil, log.WrapError(d.specialistError, "dispatcher.Run.specialistEnvelope")
+	}
 	d.prepareCapabilities(ctx, userPrompt, msgs)
 	if err := d.prepareResearch(ctx, userPrompt); err != nil {
 		return nil, log.WrapError(err, "dispatcher.Run.research")
@@ -124,6 +134,9 @@ func (d *Dispatcher) Run(ctx context.Context, userPrompt string, msgs []eino.Cha
 
 // RunStream performs a streaming orchestrated completion.
 func (d *Dispatcher) RunStream(ctx context.Context, userPrompt string, msgs []eino.ChatMessage, onChunk func(eino.StreamChunk) error, onAction ...func(actionprotocol.Action) error) (*eino.Result, error) {
+	if d.specialistError != nil {
+		return nil, log.WrapError(d.specialistError, "dispatcher.RunStream.specialistEnvelope")
+	}
 	if len(onAction) > 0 {
 		if result, handled, err := d.dispatchCapabilityHandoff(ctx, userPrompt, onChunk, onAction[0]); handled {
 			return result, err
@@ -249,6 +262,11 @@ func (d *Dispatcher) prepareCapabilities(ctx context.Context, userPrompt string,
 	)
 	routeSpan := log.StartSpan(ctx, "route.plan", "intent_mode", parsedIntent.Mode)
 	d.routePlan = athenarouter.RouteIntent(parsedIntent)
+	if d.specialist != nil {
+		d.routePlan.Capabilities = d.specialist.CapabilityIDs()
+		d.routePlan.ExcludedCapabilities = nil
+		d.routePlan.Reason = "governed_specialist_manifest"
+	}
 	routeSpan.End(nil,
 		"primary", d.routePlan.Primary,
 		"fallback_count", len(d.routePlan.Fallbacks),
@@ -316,7 +334,7 @@ func (d *Dispatcher) maxIterations() int {
 // buildInstruction assembles the system prompt: static sections (keyed by the
 // selected capability set) + per-request dynamic sections + optional memory block.
 func (d *Dispatcher) buildInstruction(userPrompt string) string {
-	parts := make([]string, 0, 5)
+	parts := make([]string, 0, 6)
 	if s := prompt.BuildStaticPrompt(d.capabilityIDs); s != "" {
 		parts = append(parts, s)
 	}
@@ -325,6 +343,9 @@ func (d *Dispatcher) buildInstruction(userPrompt string) string {
 	}
 	parts = append(parts, prompt.GetResponseLanguageSection(d.contextString("locale"), userPrompt))
 	parts = append(parts, prompt.GetRuntimeContextSection(time.Now(), d.req.Context))
+	if s := d.specialist.Instruction(); s != "" {
+		parts = append(parts, s)
+	}
 	if d.researchContext != "" {
 		parts = append(parts, d.researchContext)
 	}

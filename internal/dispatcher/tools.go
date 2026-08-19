@@ -4,10 +4,8 @@ import (
 	"context"
 
 	"github.com/good-fish-man/agent-runtime/internal/capability"
-	"github.com/good-fish-man/agent-runtime/internal/plugins"
 	"github.com/good-fish-man/agent-runtime/internal/retriever"
 	athenarouter "github.com/good-fish-man/agent-runtime/internal/router"
-	"github.com/good-fish-man/agent-runtime/internal/subagent"
 	"github.com/good-fish-man/agent-runtime/internal/tools"
 	"github.com/good-fish-man/agent-runtime/internal/types"
 	log "github.com/good-fish-man/logx"
@@ -70,20 +68,6 @@ func (d *Dispatcher) buildTools(ctx context.Context, plan athenarouter.RoutePlan
 	if videoModel, ok := d.req.Models["video"]; ok && videoModel.Name != "" {
 		extra = append(extra, d.wrapDynamicCapability(capability.VideoGenerate, tools.NewVideoGenerationTool(videoModel)))
 		capabilityIDs = append(capabilityIDs, capability.VideoGenerate)
-	}
-
-	// Sub-agent orchestration tools (spawn / delegate / parallel / manage).
-	if len(d.req.SubAgents) > 0 {
-		mgr := subagent.NewSubAgentManager(d.client.Model())
-		mgr.RegisterConfigs(d.mapSubAgents(ctx, d.req.SubAgents))
-		extra = append(extra,
-			subagent.NewSpawnTool(mgr),
-			subagent.NewParallelSpawnTool(mgr),
-			subagent.NewDelegateTool(mgr),
-			subagent.NewListTasksTool(mgr),
-			subagent.NewCancelTaskTool(mgr),
-			subagent.NewCollectTaskTool(mgr),
-		)
 	}
 
 	// Knowledge-base retrieval tool (only when knowledge bases are configured).
@@ -215,81 +199,6 @@ func readOnlyMonitorCapabilities(names []string) []string {
 		out = append(out, capability.InternetFetch)
 	}
 	return out
-}
-
-// mapSubAgents converts the trimmed types.SubAgentConfig into the subagent
-// package's richer config, defaulting the ID to the name when unset.
-func (d *Dispatcher) mapSubAgents(ctx context.Context, in []types.SubAgentConfig) []subagent.SubAgentConfig {
-	out := make([]subagent.SubAgentConfig, 0, len(in))
-	for _, c := range in {
-		id := c.ID
-		if id == "" {
-			id = c.Name
-		}
-		runtimeTools, unavailable, _ := capability.GlobalRegistry.Resolve(d.workDir, c.Capabilities)
-		if len(unavailable) > 0 {
-			log.WarnwCtx(ctx, "sub-agent capabilities unavailable", "sub_agent", id, "capabilities", unavailable)
-		}
-		runtimeTools = append(runtimeTools, d.buildSubAgentSkillTools(ctx, c.Skills)...)
-		var modelConfig *subagent.ModelConfig
-		if c.Model != nil {
-			modelConfig = &subagent.ModelConfig{
-				Provider: c.Model.Provider, Name: c.Model.Name, APIKey: c.Model.APIKey, APIBase: c.Model.APIBase,
-				Temperature: c.Model.Temperature, MaxTokens: c.Model.MaxTokens, TopP: c.Model.TopP, ExtraFields: c.Model.ExtraFields,
-			}
-		}
-		out = append(out, subagent.SubAgentConfig{
-			ID:            id,
-			Name:          c.Name,
-			Description:   c.Description,
-			Prompt:        c.Prompt,
-			Model:         modelConfig,
-			Capabilities:  append([]string{}, c.Capabilities...),
-			Skills:        subAgentSkillNames(c.Skills),
-			RuntimeTools:  runtimeTools,
-			MaxIterations: c.MaxIterations,
-			TimeoutMs:     c.TimeoutMs,
-		})
-	}
-	return out
-}
-
-func (d *Dispatcher) buildSubAgentSkillTools(ctx context.Context, skills []types.Skill) []tool.BaseTool {
-	if len(skills) == 0 {
-		return nil
-	}
-	configPath := d.cfg.SkillsConfigPath
-	if configPath == "" {
-		configPath = plugins.DefaultSkillConfigPath()
-	}
-	configMgr, err := plugins.NewSkillConfigManager(configPath)
-	if err != nil {
-		log.Warnf("[Dispatcher] sub-agent skills: failed to load skill config: %v", err)
-		configMgr, _ = plugins.NewSkillConfigManager("")
-	}
-	runner := plugins.NewSkillRunner(skills, d.skillsDir, d.sandboxConfig(), d.client.Model(), configMgr, d.workDir)
-	var out []tool.BaseTool
-	if skillTool := runner.BuildSkillTool(); skillTool != nil {
-		if info, _ := skillTool.Info(ctx); info != nil {
-			out = append(out, skillTool)
-		}
-	}
-	if loadTool := runner.BuildLoadSkillTool(); loadTool != nil {
-		if info, _ := loadTool.Info(ctx); info != nil {
-			out = append(out, loadTool)
-		}
-	}
-	return out
-}
-
-func subAgentSkillNames(skills []types.Skill) []string {
-	names := make([]string, 0, len(skills))
-	for _, skill := range skills {
-		if skill.Name != "" {
-			names = append(names, skill.Name)
-		}
-	}
-	return names
 }
 
 func mapKnowledgeBases(in []types.KnowledgeBaseConfig) []retriever.KnowledgeBaseConfig {
