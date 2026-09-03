@@ -507,7 +507,7 @@ func (t *CreateSkillTool) InvokableRun(ctx context.Context, argumentsInJSON stri
 
 	// 安全扫描内容
 	if scanSkillContent(input.Content) {
-		log.Infof("[CreateSkillTool] content failed security scan, blocking creation")
+		log.Infof(ctx, "[CreateSkillTool] content failed security scan, blocking creation")
 		return "", fmt.Errorf("skill content failed security scan")
 	}
 
@@ -529,7 +529,7 @@ func (t *CreateSkillTool) InvokableRun(ctx context.Context, argumentsInJSON stri
 		return "", fmt.Errorf("write SKILL.md failed: %w", err)
 	}
 
-	log.Infof("[CreateSkillTool] created skill at: %s", skillDir)
+	log.Infof(ctx, "[CreateSkillTool] created skill at: %s", skillDir)
 
 	// 返回成功信息
 	result := map[string]any{

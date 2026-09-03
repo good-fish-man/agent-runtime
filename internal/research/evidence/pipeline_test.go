@@ -1,6 +1,7 @@
 package evidence
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -32,11 +33,11 @@ func TestPipelineRanksAuthorityAndDetectsContradictions(t *testing.T) {
 
 func TestResearchCacheExpires(t *testing.T) {
 	cache := NewResearchCache()
-	cache.Put("key", Report{Items: []Item{{ID: "source"}}})
-	if _, ok := cache.Get("key", time.Minute); !ok {
+	cache.Put(context.Background(), "key", Report{Items: []Item{{ID: "source"}}})
+	if _, ok := cache.Get(context.Background(), "key", time.Minute); !ok {
 		t.Fatal("fresh cache entry was not returned")
 	}
-	if _, ok := cache.Get("key", time.Nanosecond); ok {
+	if _, ok := cache.Get(context.Background(), "key", time.Nanosecond); ok {
 		t.Fatal("expired cache entry was returned")
 	}
 }
@@ -45,10 +46,10 @@ func TestLayeredResearchCacheSurvivesNewInstance(t *testing.T) {
 	dir := t.TempDir()
 	first := NewLayeredResearchCache(dir)
 	report := Report{Items: []Item{{ID: "source", URL: "https://example.com", Content: "public evidence"}}}
-	first.Put("research-key", report)
+	first.Put(context.Background(), "research-key", report)
 
 	second := NewLayeredResearchCache(dir)
-	got, ok := second.Get("research-key", time.Hour)
+	got, ok := second.Get(context.Background(), "research-key", time.Hour)
 	if !ok || len(got.Items) != 1 || got.Items[0].Content != "public evidence" {
 		t.Fatalf("disk cache was not restored: ok=%t report=%+v", ok, got)
 	}

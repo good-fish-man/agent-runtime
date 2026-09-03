@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -71,12 +72,8 @@ func resolveTraceID(ctx context.Context, fromRequest string) string {
 	if fromRequest != "" {
 		return fromRequest
 	}
-	if ctx != nil {
-		if v := ctx.Value(log.ReqIDKey); v != nil {
-			if s, ok := v.(string); ok && s != "" {
-				return s
-			}
-		}
+	if value := log.ReqID(ctx); value != "" {
+		return value
 	}
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
 		if v := md.Get(constant.MetaKeyTraceID); len(v) > 0 && v[0] != "" {
@@ -93,15 +90,11 @@ func resolveTraceID(ctx context.Context, fromRequest string) string {
 	return newTraceID()
 }
 
-// bindTrace resolves the request trace_id, injects it into ctx, and binds it to
-// the current goroutine so every log line emitted while handling the request
-// carries [trace_id]. The returned ctx must be used downstream (so ctx-based
-// logging and log.Go inherit the id); release() must be deferred to unbind.
-func (s *Server) bindTrace(ctx context.Context, fromRequest string) (context.Context, string, func()) {
+// bindTrace resolves the request trace_id and returns the context that must be
+// propagated to every downstream operation.
+func (s *Server) bindTrace(ctx context.Context, fromRequest string) (context.Context, string) {
 	traceID := resolveTraceID(ctx, fromRequest)
-	ctx = log.WithReqID(ctx, traceID)
-	log.SetReqId(traceID)
-	return ctx, traceID, log.ClearReqId
+	return log.WithReqID(ctx, traceID), traceID
 }
 
 // modelConfig picks the request's default model, else the server default.
@@ -216,11 +209,11 @@ func (s *Server) memoryInstruction(ctx context.Context, reqCtx *structpb.Struct)
 }
 
 // reviewMemories launches async memory extraction after a response.
-func (s *Server) reviewMemories(model eino.ModelConfig, sessionID, userID, agentID, userInput, assistantOutput string) {
+func (s *Server) reviewMemories(ctx context.Context, model eino.ModelConfig, sessionID, userID, agentID, userInput, assistantOutput string) {
 	if s.cfg.Reviewer == nil {
 		return
 	}
-	s.cfg.Reviewer.ReviewIfNeeded(model, sessionID, userID, agentID, userInput, assistantOutput)
+	s.cfg.Reviewer.ReviewIfNeeded(ctx, model, sessionID, userID, agentID, userInput, assistantOutput)
 }
 
 // currentMemories returns the session's stored memories as proto messages.
@@ -264,10 +257,9 @@ func memoryKindToProto(kind string) runtimev1.MemoryType {
 
 // Run performs a non-streaming completion.
 func (s *Server) Run(ctx context.Context, req *runtimev1.RunRequest) (*runtimev1.RunResponse, error) {
-	ctx, traceID, release := s.bindTrace(ctx, req.GetTraceId())
-	defer release()
+	ctx, traceID := s.bindTrace(ctx, req.GetTraceId())
 	ctx, usageCollector := eino.WithUsageCollector(ctx)
-	log.Infow("run", "prompt_len", len(req.GetPrompt()), "messages", len(req.GetMessages()), "stream", false)
+	log.Infow(ctx, "run", "prompt_len", len(req.GetPrompt()), "messages", len(req.GetMessages()), "stream", false)
 	mc, err := s.modelConfig(req.GetModels())
 	if err != nil {
 		return nil, log.WrapError(err, "Server.Run.modelConfig")
@@ -278,13 +270,13 @@ func (s *Server) Run(ctx context.Context, req *runtimev1.RunRequest) (*runtimev1
 	}
 	instruction, sessionID, userID, agentID := s.memoryInstruction(ctx, req.GetContext())
 	ctx = provider.WithInvocationScope(ctx, userID, providerTaskID(req.GetContext(), req.GetRequestId(), traceID))
-	disp := s.newRunDispatcher(client, req, instruction)
+	disp := s.newRunDispatcher(ctx, client, req, instruction)
 	start := time.Now()
 	res, err := disp.Run(ctx, req.GetPrompt(), fromProtoMessages(req.GetMessages()))
 	if err != nil {
 		return nil, log.GRPCError(err, codes.Unavailable, "Server.Run.Dispatch", "model call failed")
 	}
-	s.reviewMemories(mc, sessionID, userID, agentID, req.GetPrompt(), res.Content)
+	s.reviewMemories(ctx, mc, sessionID, userID, agentID, req.GetPrompt(), res.Content)
 	responseMetadata := buildResponseMetadata(client.Name(), time.Since(start).Milliseconds(), res.Usage, usageCollector)
 	return &runtimev1.RunResponse{
 		Content:      res.Content,
@@ -298,10 +290,9 @@ func (s *Server) Run(ctx context.Context, req *runtimev1.RunRequest) (*runtimev1
 
 // RunAgent performs a non-streaming autonomous task (natural language input).
 func (s *Server) RunAgent(ctx context.Context, req *runtimev1.AgentRequest) (*runtimev1.AgentResponse, error) {
-	ctx, traceID, release := s.bindTrace(ctx, req.GetTraceId())
-	defer release()
+	ctx, traceID := s.bindTrace(ctx, req.GetTraceId())
 	ctx, usageCollector := eino.WithUsageCollector(ctx)
-	log.Infow("agent", "task_len", len(req.GetTask()), "stream", false)
+	log.Infow(ctx, "agent", "task_len", len(req.GetTask()), "stream", false)
 	if req.GetTask() == "" {
 		return nil, status.Error(codes.InvalidArgument, "task is required")
 	}
@@ -315,13 +306,13 @@ func (s *Server) RunAgent(ctx context.Context, req *runtimev1.AgentRequest) (*ru
 	}
 	instruction, sessionID, userID, agentID := s.memoryInstruction(ctx, req.GetContext())
 	ctx = provider.WithInvocationScope(ctx, userID, providerTaskID(req.GetContext(), req.GetRequestId(), traceID))
-	disp := s.newAgentDispatcher(client, req, instruction)
+	disp := s.newAgentDispatcher(ctx, client, req, instruction)
 	start := time.Now()
 	res, err := disp.Run(ctx, req.GetTask(), nil)
 	if err != nil {
 		return nil, log.GRPCError(err, codes.Unavailable, "Server.RunAgent.Dispatch", "model call failed")
 	}
-	s.reviewMemories(mc, sessionID, userID, agentID, req.GetTask(), res.Content)
+	s.reviewMemories(ctx, mc, sessionID, userID, agentID, req.GetTask(), res.Content)
 	responseMetadata := buildResponseMetadata(client.Name(), time.Since(start).Milliseconds(), res.Usage, usageCollector)
 	return &runtimev1.AgentResponse{
 		Content:      res.Content,
@@ -338,8 +329,7 @@ func (s *Server) GenerateMedia(ctx context.Context, req *runtimev1.MediaGenerati
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "media request is required")
 	}
-	ctx, traceID, release := s.bindTrace(ctx, req.GetTraceId())
-	defer release()
+	ctx, traceID := s.bindTrace(ctx, req.GetTraceId())
 	if req.GetModel() == nil || strings.TrimSpace(req.GetModel().GetName()) == "" {
 		return nil, status.Error(codes.InvalidArgument, "media model is required")
 	}
@@ -374,8 +364,7 @@ func (s *Server) GenerateMedia(ctx context.Context, req *runtimev1.MediaGenerati
 
 // HealthCheck reports serving status.
 func (s *Server) HealthCheck(ctx context.Context, req *runtimev1.HealthCheckRequest) (*runtimev1.HealthCheckResponse, error) {
-	_, traceID, release := s.bindTrace(ctx, req.GetTraceId())
-	defer release()
+	_, traceID := s.bindTrace(ctx, req.GetTraceId())
 	return &runtimev1.HealthCheckResponse{
 		Status:  runtimev1.HealthCheckResponse_SERVING,
 		Version: constant.Version,
@@ -385,8 +374,7 @@ func (s *Server) HealthCheck(ctx context.Context, req *runtimev1.HealthCheckRequ
 
 // ListCapabilities returns the provider-independent Runtime ability catalog.
 func (s *Server) ListCapabilities(ctx context.Context, req *runtimev1.ListCapabilitiesRequest) (*runtimev1.ListCapabilitiesResponse, error) {
-	_, traceID, release := s.bindTrace(ctx, req.GetTraceId())
-	defer release()
+	_, traceID := s.bindTrace(ctx, req.GetTraceId())
 	definitions := capability.GlobalRegistry.List()
 	items := make([]*runtimev1.CapabilityDefinition, 0, len(definitions))
 	for _, definition := range definitions {
@@ -484,13 +472,7 @@ func (s *Server) streamCompletion(
 			}},
 		})
 	}, func(action actionprotocol.Action) error {
-		payload, payloadErr := structpb.NewStruct(map[string]any{
-			"protocol": action.Protocol, "type": action.Type, "task_id": action.TaskID,
-			"action_id": action.ActionID, "session_id": action.SessionID, "sequence": action.Sequence,
-			"idempotency_key": action.IdempotencyKey, "deadline": action.Deadline.Format(time.RFC3339Nano),
-			"capability": action.Capability, "arguments": action.Arguments,
-			"policy": map[string]any{"risk": action.Policy.Risk, "decision": action.Policy.Decision},
-		})
+		payload, payloadErr := clientActionPayload(action)
 		if payloadErr != nil {
 			return payloadErr
 		}
@@ -526,8 +508,20 @@ func (s *Server) streamCompletion(
 			Metadata:         responseMetadata,
 		}},
 	})
-	s.reviewMemories(mc, scope.sessionID, scope.userID, scope.agentID, scope.userInput, res.Content)
+	s.reviewMemories(ctx, mc, scope.sessionID, scope.userID, scope.agentID, scope.userInput, res.Content)
 	return log.WrapError(err, "Server.streamCompletion.emitDone")
+}
+
+func clientActionPayload(action actionprotocol.Action) (*structpb.Struct, error) {
+	encoded, err := json.Marshal(action)
+	if err != nil {
+		return nil, fmt.Errorf("encode client action: %w", err)
+	}
+	var values map[string]any
+	if err := json.Unmarshal(encoded, &values); err != nil {
+		return nil, fmt.Errorf("decode client action payload: %w", err)
+	}
+	return structpb.NewStruct(values)
 }
 
 func researchQueryTextsPayload(values []string) []any {
@@ -571,10 +565,9 @@ type memScope struct {
 // RunStream streams a completion for a configured Run request.
 func (s *Server) RunStream(req *runtimev1.RunRequest, stream runtimev1.AgentRuntime_RunStreamServer) error {
 	ctx := stream.Context()
-	ctx, traceID, release := s.bindTrace(ctx, req.GetTraceId())
-	defer release()
+	ctx, traceID := s.bindTrace(ctx, req.GetTraceId())
 	ctx, _ = eino.WithUsageCollector(ctx)
-	log.Infow("run_stream", "prompt_len", len(req.GetPrompt()), "messages", len(req.GetMessages()))
+	log.Infow(ctx, "run_stream", "prompt_len", len(req.GetPrompt()), "messages", len(req.GetMessages()))
 	mc, err := s.modelConfig(req.GetModels())
 	if err != nil {
 		return log.WrapError(err, "Server.RunStream.modelConfig")
@@ -585,7 +578,7 @@ func (s *Server) RunStream(req *runtimev1.RunRequest, stream runtimev1.AgentRunt
 	}
 	instruction, sessionID, userID, agentID := s.memoryInstruction(ctx, req.GetContext())
 	ctx = provider.WithInvocationScope(ctx, userID, providerTaskID(req.GetContext(), req.GetRequestId(), traceID))
-	disp := s.newRunDispatcher(client, req, instruction)
+	disp := s.newRunDispatcher(ctx, client, req, instruction)
 	return log.WrapError(s.streamCompletion(ctx, traceID, req.GetPrompt(), fromProtoMessages(req.GetMessages()), mc, client, disp,
 		memScope{sessionID: sessionID, userID: userID, agentID: agentID, userInput: req.GetPrompt()}, stream.Send), "Server.RunStream")
 }
@@ -593,10 +586,9 @@ func (s *Server) RunStream(req *runtimev1.RunRequest, stream runtimev1.AgentRunt
 // RunAgentStream streams an autonomous task response.
 func (s *Server) RunAgentStream(req *runtimev1.AgentRequest, stream runtimev1.AgentRuntime_RunAgentStreamServer) error {
 	ctx := stream.Context()
-	ctx, traceID, release := s.bindTrace(ctx, req.GetTraceId())
-	defer release()
+	ctx, traceID := s.bindTrace(ctx, req.GetTraceId())
 	ctx, _ = eino.WithUsageCollector(ctx)
-	log.Infow("agent_stream", "task_len", len(req.GetTask()))
+	log.Infow(ctx, "agent_stream", "task_len", len(req.GetTask()))
 	if req.GetTask() == "" {
 		return status.Error(codes.InvalidArgument, "task is required")
 	}
@@ -610,7 +602,7 @@ func (s *Server) RunAgentStream(req *runtimev1.AgentRequest, stream runtimev1.Ag
 	}
 	instruction, sessionID, userID, agentID := s.memoryInstruction(ctx, req.GetContext())
 	ctx = provider.WithInvocationScope(ctx, userID, providerTaskID(req.GetContext(), req.GetRequestId(), traceID))
-	disp := s.newAgentDispatcher(client, req, instruction)
+	disp := s.newAgentDispatcher(ctx, client, req, instruction)
 	return log.WrapError(s.streamCompletion(ctx, traceID, req.GetTask(), nil, mc, client, disp,
 		memScope{sessionID: sessionID, userID: userID, agentID: agentID, userInput: req.GetTask()}, stream.Send), "Server.RunAgentStream")
 }
@@ -640,16 +632,14 @@ func buildResponseMetadata(modelName string, latencyMS int64, fallback eino.Usag
 
 // Resume is not yet implemented (approval/checkpoint engine pending).
 func (s *Server) Resume(ctx context.Context, req *runtimev1.ResumeRequest) (*runtimev1.ResumeResponse, error) {
-	_, _, release := s.bindTrace(ctx, req.GetTraceId())
-	defer release()
-	log.Infow("resume", "checkpoint", req.GetCheckpointId())
+	ctx, _ = s.bindTrace(ctx, req.GetTraceId())
+	log.Infow(ctx, "resume", "checkpoint", req.GetCheckpointId())
 	return nil, status.Error(codes.Unimplemented, "Resume not implemented in skeleton")
 }
 
 // Stop is not yet implemented (run registry pending).
 func (s *Server) Stop(ctx context.Context, req *runtimev1.StopRequest) (*runtimev1.StopResponse, error) {
-	_, _, release := s.bindTrace(ctx, req.GetTraceId())
-	defer release()
-	log.Infow("stop", "checkpoint", req.GetCheckpointId(), "session", req.GetSessionId())
+	ctx, _ = s.bindTrace(ctx, req.GetTraceId())
+	log.Infow(ctx, "stop", "checkpoint", req.GetCheckpointId(), "session", req.GetSessionId())
 	return nil, status.Error(codes.Unimplemented, "Stop not implemented in skeleton")
 }

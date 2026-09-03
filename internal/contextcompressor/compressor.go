@@ -155,11 +155,11 @@ func (c *Compactor) Compact(ctx context.Context, messages []Message, opts ...Opt
 
 	// 风格预处理：先裁剪旧工具结果
 	// 这可以显著减少 token 数量，避免过早触发完整压缩
-	ccMessages := c.preprocessMessages(messages)
+	ccMessages := c.preprocessMessages(ctx, messages)
 
 	// 重新计算 token 数
 	preprocessedTokens := c.tokenizer.EstimateMessages(ccMessages)
-	log.Infof("[Compactor] After preprocessing: %d -> %d tokens", tokenCount, preprocessedTokens)
+	log.Infof(ctx, "[Compactor] After preprocessing: %d -> %d tokens", tokenCount, preprocessedTokens)
 
 	var result *compactors.CompactionResult
 	var err error
@@ -194,7 +194,7 @@ func (c *Compactor) Compact(ctx context.Context, messages []Message, opts ...Opt
 // preprocessMessages 预处理消息 风格的裁剪
 // 1. 裁剪旧工具结果
 // 2. 保护头部和尾部消息
-func (c *Compactor) preprocessMessages(messages []Message) []compactors.Message {
+func (c *Compactor) preprocessMessages(ctx context.Context, messages []Message) []compactors.Message {
 	if len(messages) == 0 {
 		return toCompactorsMessages(messages)
 	}
@@ -223,7 +223,7 @@ func (c *Compactor) preprocessMessages(messages []Message) []compactors.Message 
 		return preprocessed
 	}
 
-	log.Infof("[Compactor] Preprocessing reduced messages: %d -> %d", len(messages), len(result))
+	log.Infof(ctx, "[Compactor] Preprocessing reduced messages: %d -> %d", len(messages), len(result))
 	return result
 }
 

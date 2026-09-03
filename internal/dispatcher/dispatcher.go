@@ -24,6 +24,7 @@ import (
 	"github.com/good-fish-man/agent-runtime/internal/prompt"
 	"github.com/good-fish-man/agent-runtime/internal/research"
 	athenarouter "github.com/good-fish-man/agent-runtime/internal/router"
+	runtimeartifacts "github.com/good-fish-man/agent-runtime/internal/runtimeartifact"
 	"github.com/good-fish-man/agent-runtime/internal/specialist"
 	"github.com/good-fish-man/agent-runtime/internal/types"
 	log "github.com/good-fish-man/logx"
@@ -42,6 +43,11 @@ type Config struct {
 	SkillsDir                string // overrides skill discovery directory
 	SkillsConfigPath         string // skills-config.yaml path
 	SkillsGlobalDir          string // additional skills directory to scan
+	SemanticIntentMode       string
+	SemanticIntentTimeout    time.Duration
+	SemanticIntentConfidence float64
+	SemanticIntentMaxHistory int
+	IntentCatalog            *intent.Catalog
 	ResearchRunner           research.Runner
 	DisableResearch          bool
 	ResearchModelPlanning    bool
@@ -65,10 +71,16 @@ type Dispatcher struct {
 	availableSkills    []types.Skill
 	skillsDir          string
 	allowSkillCreation bool
+	intentMode         string
+	intentParser       *intent.Parser
+	intentClassifier   semanticIntentClassifier
 	researchExecutor   research.Runner
 	researchContext    string
 	researchEvidence   research.Evidence
 	researchProgress   func(research.Progress) error
+	runtimeArtifacts   *runtimeartifacts.Set
+	artifactSelection  runtimeartifacts.Selection
+	artifactError      error
 	specialist         *specialist.Envelope
 	specialistError    error
 }
@@ -76,7 +88,7 @@ type Dispatcher struct {
 // New builds a Dispatcher for req. memInstruction is an optional memory block
 // appended to the system instruction. workingDir binds filesystem/shell tools.
 // cfg supplies operator-level defaults (sandbox image, skills dir, ...).
-func New(client *eino.Client, req *types.RunRequest, workingDir, memInstruction string, cfg Config) *Dispatcher {
+func New(ctx context.Context, client *eino.Client, req *types.RunRequest, workingDir, memInstruction string, cfg Config) *Dispatcher {
 	if req == nil {
 		req = &types.RunRequest{}
 	}
@@ -93,13 +105,16 @@ func New(client *eino.Client, req *types.RunRequest, workingDir, memInstruction 
 		workDir:          workingDir,
 		memInstr:         memInstruction,
 		cfg:              cfg,
+		intentParser:     intent.NewParser(cfg.IntentCatalog),
 		researchExecutor: researchRunner,
 	}
+	d.configureSemanticIntent(ctx)
+	d.runtimeArtifacts, d.artifactError = runtimeartifacts.ParseContext(req.Context)
 	d.specialist, d.specialistError = specialist.ParseContext(req.Context)
 	if d.specialistError == nil && d.specialist != nil {
 		req.Capabilities, d.specialistError = d.specialist.RestrictCapabilities(req.Capabilities)
 	}
-	d.skillsDir, d.availableSkills = d.discoverSkills()
+	d.skillsDir, d.availableSkills = d.discoverSkills(ctx)
 	d.compact = d.buildCompactService()
 	return d
 }
@@ -112,6 +127,9 @@ func (d *Dispatcher) SetResearchProgressHandler(handler func(research.Progress) 
 
 // Run performs a non-streaming orchestrated completion.
 func (d *Dispatcher) Run(ctx context.Context, userPrompt string, msgs []eino.ChatMessage) (*eino.Result, error) {
+	if d.artifactError != nil {
+		return nil, log.WrapError(d.artifactError, "dispatcher.Run.runtimeArtifacts")
+	}
 	if d.specialistError != nil {
 		return nil, log.WrapError(d.specialistError, "dispatcher.Run.specialistEnvelope")
 	}
@@ -134,6 +152,9 @@ func (d *Dispatcher) Run(ctx context.Context, userPrompt string, msgs []eino.Cha
 
 // RunStream performs a streaming orchestrated completion.
 func (d *Dispatcher) RunStream(ctx context.Context, userPrompt string, msgs []eino.ChatMessage, onChunk func(eino.StreamChunk) error, onAction ...func(actionprotocol.Action) error) (*eino.Result, error) {
+	if d.artifactError != nil {
+		return nil, log.WrapError(d.artifactError, "dispatcher.RunStream.runtimeArtifacts")
+	}
 	if d.specialistError != nil {
 		return nil, log.WrapError(d.specialistError, "dispatcher.RunStream.specialistEnvelope")
 	}
@@ -186,7 +207,7 @@ func (d *Dispatcher) RunStream(ctx context.Context, userPrompt string, msgs []ei
 	result, err := d.client.Stream(ctx, userPrompt, msgs, params, onChunk)
 	if err != nil {
 		if eino.IsEmptyToolCallStream(err) {
-			log.Warnw("stream tool calls produced no visible content; retrying non-streaming", "error", err)
+			log.Warnw(ctx, "stream tool calls produced no visible content; retrying non-streaming", "error", err)
 			result, genErr := d.client.Generate(ctx, userPrompt, msgs, d.nonStreamingRunParams(ctx, instruction))
 			if genErr != nil {
 				return nil, log.WrapError(genErr, "dispatcher.RunStream.toolCallFallback")
@@ -249,16 +270,22 @@ func (d *Dispatcher) nonStreamingRunParams(ctx context.Context, instruction stri
 func (d *Dispatcher) prepareCapabilities(ctx context.Context, userPrompt string, msgs []eino.ChatMessage) {
 	text := capabilityText(userPrompt, msgs)
 	intentSpan := log.StartSpan(ctx, "intent.parse", "message_count", len(msgs), "has_files", len(d.req.Files) > 0)
-	parsedIntent := intent.Parse(intent.Request{
-		Text:                 userPrompt,
-		HasFiles:             len(d.req.Files) > 0,
-		ActiveBrowserSession: d.contextString("active_browser_session") != "",
-		ActiveDesktopSession: d.contextString("active_desktop_session") != "",
-		PreviousUserMessages: d.previousUserMessages(msgs),
-	})
+	intentRequest := intent.Request{
+		Text:                    userPrompt,
+		HasFiles:                len(d.req.Files) > 0,
+		ActiveBrowserSession:    d.contextString("active_browser_session") != "",
+		ActiveDesktopSession:    d.contextString("active_desktop_session") != "",
+		BackgroundMonitor:       d.isBackgroundMonitor(),
+		PersistentGoalExecution: d.contextBool("persistent_goal_execution"),
+		Locale:                  d.contextString("locale"),
+		Timezone:                d.contextString("timezone"),
+		PreviousUserMessages:    d.previousUserMessages(msgs),
+	}
+	parsedIntent, intentSource := d.resolveIntent(ctx, intentRequest)
 	intentSpan.End(nil,
 		"intent_mode", parsedIntent.Mode,
 		"confidence", parsedIntent.Confidence,
+		"source", intentSource,
 	)
 	routeSpan := log.StartSpan(ctx, "route.plan", "intent_mode", parsedIntent.Mode)
 	d.routePlan = athenarouter.RouteIntent(parsedIntent)
@@ -281,7 +308,19 @@ func (d *Dispatcher) prepareCapabilities(ctx context.Context, userPrompt string,
 	}
 	d.allowSkillCreation = matchesAny(text, skillCreationKeywords)
 	d.extraTools, d.capabilityIDs = d.buildTools(ctx, d.routePlan)
-	log.Infof("[Dispatcher] route: primary=%s reason=%s confidence=%.2f fallbacks=%v skills_available=%d skills_selected=%v capabilities_selected=%v",
+	d.artifactSelection = d.runtimeArtifacts.Select(d.req.Context, d.capabilityIDs)
+	if d.runtimeArtifacts != nil {
+		bundle := d.runtimeArtifacts.Bundle()
+		log.Infow(ctx, "runtime artifacts resolved",
+			"manifest_id", bundle.ManifestID,
+			"build_id", bundle.BuildID,
+			"skills_available", len(bundle.Skills),
+			"skills_selected", len(d.artifactSelection.Skills),
+			"strategies_selected", len(d.artifactSelection.Strategies),
+			"skills_unavailable", len(d.artifactSelection.UnavailableSkill),
+		)
+	}
+	log.Infof(ctx, "[Dispatcher] route: primary=%s reason=%s confidence=%.2f fallbacks=%v skills_available=%d skills_selected=%v capabilities_selected=%v",
 		d.routePlan.Primary, d.routePlan.Reason, d.routePlan.Intent.Confidence, d.routePlan.Fallbacks,
 		len(d.availableSkills), skillNames(d.req.Skills), d.capabilityIDs)
 }
@@ -334,7 +373,7 @@ func (d *Dispatcher) maxIterations() int {
 // buildInstruction assembles the system prompt: static sections (keyed by the
 // selected capability set) + per-request dynamic sections + optional memory block.
 func (d *Dispatcher) buildInstruction(userPrompt string) string {
-	parts := make([]string, 0, 6)
+	parts := make([]string, 0, 7)
 	if s := prompt.BuildStaticPrompt(d.capabilityIDs); s != "" {
 		parts = append(parts, s)
 	}
@@ -343,6 +382,9 @@ func (d *Dispatcher) buildInstruction(userPrompt string) string {
 	}
 	parts = append(parts, prompt.GetResponseLanguageSection(d.contextString("locale"), userPrompt))
 	parts = append(parts, prompt.GetRuntimeContextSection(time.Now(), d.req.Context))
+	if s := d.runtimeArtifacts.Instruction(d.artifactSelection); s != "" {
+		parts = append(parts, s)
+	}
 	if s := d.specialist.Instruction(); s != "" {
 		parts = append(parts, s)
 	}
@@ -364,12 +406,16 @@ func (d *Dispatcher) prepareResearch(ctx context.Context, userPrompt string) err
 	routePlan := d.routePlan
 	if routePlan.Primary == "" {
 		intentSpan := log.StartSpan(ctx, "intent.parse", "phase", "research_fallback")
-		parsed := intent.Parse(intent.Request{
-			Text:                 userPrompt,
-			HasFiles:             len(d.req.Files) > 0,
-			ActiveBrowserSession: d.contextString("active_browser_session") != "",
-			ActiveDesktopSession: d.contextString("active_desktop_session") != "",
-			PreviousUserMessages: d.previousUserMessages(nil),
+		parsed := d.parseIntent(intent.Request{
+			Text:                    userPrompt,
+			HasFiles:                len(d.req.Files) > 0,
+			ActiveBrowserSession:    d.contextString("active_browser_session") != "",
+			ActiveDesktopSession:    d.contextString("active_desktop_session") != "",
+			BackgroundMonitor:       d.isBackgroundMonitor(),
+			PersistentGoalExecution: d.contextBool("persistent_goal_execution"),
+			Locale:                  d.contextString("locale"),
+			Timezone:                d.contextString("timezone"),
+			PreviousUserMessages:    d.previousUserMessages(nil),
 		})
 		intentSpan.End(nil, "intent_mode", parsed.Mode, "confidence", parsed.Confidence)
 		routeSpan := log.StartSpan(ctx, "route.plan", "phase", "research_fallback", "intent_mode", parsed.Mode)
@@ -393,7 +439,7 @@ func (d *Dispatcher) prepareResearch(ctx context.Context, userPrompt string) err
 	if plan.Kind == research.KindNone {
 		return nil
 	}
-	log.InfowCtx(ctx, "research execution started", "kind", plan.Kind, "queries", len(plan.Queries), "source_limit", plan.MaxSources)
+	log.Infow(ctx, "research execution started", "kind", plan.Kind, "queries", len(plan.Queries), "source_limit", plan.MaxSources)
 	var evidence research.Evidence
 	var err error
 	if advanced, ok := d.researchExecutor.(research.AdvancedRunner); ok {
@@ -414,12 +460,12 @@ func (d *Dispatcher) prepareResearch(ctx context.Context, userPrompt string) err
 		return err
 	}
 	for _, failure := range evidence.Failures {
-		log.WarnwCtx(ctx, "research source failed", "kind", plan.Kind, "error", failure)
+		log.Warnw(ctx, "research source failed", "kind", plan.Kind, "error", failure)
 	}
 	d.researchContext = evidence.ContextSection()
 	d.researchEvidence = evidence
 	d.disableModelResearchTools(ctx)
-	log.InfowCtx(ctx, "research execution completed",
+	log.Infow(ctx, "research execution completed",
 		"kind", plan.Kind,
 		"sources", len(evidence.Sources),
 		"failures", len(evidence.Failures),
@@ -460,14 +506,15 @@ func (d *Dispatcher) previousUserMessages(msgs []eino.ChatMessage) []string {
 }
 
 func (d *Dispatcher) disableModelResearchTools(ctx context.Context) {
-	removedCapabilities := []string{
-		capability.InternetSearch, capability.InternetFetch,
-		capability.BrowserSearch, capability.BrowserTask, capability.BrowserOpen,
-		capability.BrowserNavigate, capability.BrowserLogin, capability.BrowserRead,
-		capability.BrowserObserve, capability.BrowserAction, capability.BrowserWait,
-		capability.BrowserDownload, capability.BrowserScreenshot, capability.BrowserClose,
+	selected := capability.NewSet(d.capabilityIDs...)
+	removedCapabilities := []string{capability.InternetSearch, capability.InternetFetch}
+	for _, id := range selected.IDs() {
+		if capability.IsBrowser(id) {
+			removedCapabilities = append(removedCapabilities, id)
+		}
 	}
-	d.capabilityIDs = withoutToolNames(d.capabilityIDs, removedCapabilities...)
+	selected.Remove(removedCapabilities...)
+	d.capabilityIDs = selected.IDs()
 	removedModelNames := make([]string, 0, len(removedCapabilities))
 	for _, id := range removedCapabilities {
 		removedModelNames = append(removedModelNames, capability.ModelName(id))
@@ -480,7 +527,7 @@ func (d *Dispatcher) repairResearchResult(ctx context.Context, userPrompt string
 	if !needsRepair {
 		return result, nil
 	}
-	log.WarnwCtx(ctx, "research answer rejected", "kind", d.researchEvidence.Plan.Kind, "reason", reason)
+	log.Warnw(ctx, "research answer rejected", "kind", d.researchEvidence.Plan.Kind, "reason", reason)
 	repaired, err := d.client.Generate(ctx, userPrompt, msgs, d.nonStreamingRunParams(ctx, instruction+"\n\n"+d.researchEvidence.RepairInstruction(reason)))
 	if err != nil {
 		return nil, log.WrapError(err, "dispatcher.repairResearchResult.generate")
@@ -489,7 +536,7 @@ func (d *Dispatcher) repairResearchResult(ctx context.Context, userPrompt string
 	repaired.Usage.CompletionTokens += result.Usage.CompletionTokens
 	repaired.Usage.TotalTokens += result.Usage.TotalTokens
 	if invalid, retryReason := d.researchEvidence.NeedsRepair(repaired.Content); invalid {
-		log.WarnwCtx(ctx, "research answer repair rejected", "kind", d.researchEvidence.Plan.Kind, "reason", retryReason)
+		log.Warnw(ctx, "research answer repair rejected", "kind", d.researchEvidence.Plan.Kind, "reason", retryReason)
 		repaired.Content = d.researchEvidence.FallbackAnswer()
 		repaired.FinishReason = "stop"
 	}

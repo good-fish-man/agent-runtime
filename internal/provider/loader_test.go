@@ -277,7 +277,7 @@ func writeSignedPackage(t *testing.T, root string, manifest pluginv1.ProviderMan
 		t.Fatal(err)
 	}
 	trustPath := filepath.Join(root, "trust-store.json")
-	writeJSON(t, trustPath, trustStore{Schema: "athena.plugin-trust.v1", Keys: []trustKey{{KeyID: "test-key", Algorithm: pluginv1.SignatureEd25519, PublicKey: base64.StdEncoding.EncodeToString(publicKey)}}})
+	writeJSON(t, trustPath, trustStore{Schema: pluginv1.TrustStoreSchema, Keys: []trustKey{{KeyID: "test-key", Algorithm: pluginv1.SignatureEd25519, PublicKey: base64.StdEncoding.EncodeToString(publicKey)}}})
 	entry := testEntry(providerPackage.Manifest, pluginv1.ManifestSHA256(manifestBytes))
 	entry.ScanReportSHA256 = pluginsdk.Digest(scanBytes)
 	return entry, Config{Enabled: true, Directory: directory, RegistryPath: filepath.Join(root, "registry.json"), TrustStorePath: trustPath, AuditPath: filepath.Join(root, "audit.jsonl"), RuntimeVersion: "0.8.0", RequireSignature: true}

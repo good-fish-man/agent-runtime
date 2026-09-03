@@ -78,7 +78,7 @@ func (t *DelegateTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 		return "", fmt.Errorf("parse delegate input failed: %w", err)
 	}
 
-	log.Infof("[DelegateTool] Delegating task to agent: %s", input.AgentID)
+	log.Infof(ctx, "[DelegateTool] Delegating task to agent: %s", input.AgentID)
 
 	// 构建任务描述，添加额外上下文
 	task := input.Task
@@ -98,7 +98,7 @@ func (t *DelegateTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 		return "", fmt.Errorf("marshal result failed: %w", err)
 	}
 
-	log.Infof("[DelegateTool] Agent %s completed, output length: %d", input.AgentID, len(result.Output))
+	log.Infof(ctx, "[DelegateTool] Agent %s completed, output length: %d", input.AgentID, len(result.Output))
 
 	return string(resultJSON), nil
 }

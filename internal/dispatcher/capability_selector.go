@@ -133,6 +133,9 @@ func tokenSet(text string) map[string]bool {
 	result := make(map[string]bool)
 	for _, token := range latinTokenPattern.FindAllString(strings.ToLower(text), -1) {
 		result[token] = true
+		if normalized := strings.Trim(token, "._-"); normalized != "" {
+			result[normalized] = true
+		}
 	}
 	return result
 }

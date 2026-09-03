@@ -322,7 +322,7 @@ func (p *SkillPlanner) Execute(ctx context.Context, plan *ExecutionPlan) (map[st
 	results := make(map[string]any)
 
 	for stageIdx, stage := range plan.Stages {
-		log.Infof("[SkillPlanner] Executing stage %d with %d skills (parallel)", stageIdx, len(stage.Skills))
+		log.Infof(ctx, "[SkillPlanner] Executing stage %d with %d skills (parallel)", stageIdx, len(stage.Skills))
 
 		// 并行执行同阶段的 skill
 		resultsCh := make(chan struct {
@@ -333,8 +333,8 @@ func (p *SkillPlanner) Execute(ctx context.Context, plan *ExecutionPlan) (map[st
 
 		for _, exec := range stage.Skills {
 			skill, inputCtx := exec.Skill, exec.InputCtx
-			log.Go(func() {
-				result, err := p.executeSkill(ctx, skill, inputCtx)
+			log.Go(ctx, func(childCtx context.Context) {
+				result, err := p.executeSkill(childCtx, skill, inputCtx)
 				resultsCh <- struct {
 					skillID string
 					result  any
@@ -348,10 +348,10 @@ func (p *SkillPlanner) Execute(ctx context.Context, plan *ExecutionPlan) (map[st
 			select {
 			case res := <-resultsCh:
 				if res.err != nil {
-					log.Errorf("[SkillPlanner] Skill %s failed: %v", res.skillID, res.err)
+					log.Errorf(ctx, "[SkillPlanner] Skill %s failed: %v", res.skillID, res.err)
 					results[res.skillID+"_error"] = res.err.Error()
 				} else {
-					log.Infof("[SkillPlanner] Skill %s completed", res.skillID)
+					log.Infof(ctx, "[SkillPlanner] Skill %s completed", res.skillID)
 					results[res.skillID+"_result"] = res.result
 				}
 			case <-ctx.Done():
@@ -375,7 +375,7 @@ func (p *SkillPlanner) executeSkill(ctx context.Context, skill types.Skill, inpu
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
-			log.Infof("[SkillPlanner] Skill %s retry attempt %d/%d", skill.ID, attempt, maxRetries)
+			log.Infof(ctx, "[SkillPlanner] Skill %s retry attempt %d/%d", skill.ID, attempt, maxRetries)
 		}
 
 		// 执行 skill (调用 SkillRunner.RunSkill)
@@ -383,12 +383,12 @@ func (p *SkillPlanner) executeSkill(ctx context.Context, skill types.Skill, inpu
 
 		if err == nil {
 			latency := time.Since(start).Milliseconds()
-			log.Infof("[SkillPlanner] Skill %s executed successfully in %dms", skill.ID, latency)
+			log.Infof(ctx, "[SkillPlanner] Skill %s executed successfully in %dms", skill.ID, latency)
 			return result, nil
 		}
 
 		lastErr = err
-		log.Warnf("[SkillPlanner] Skill %s attempt %d failed: %v", skill.ID, attempt+1, err)
+		log.Warnf(ctx, "[SkillPlanner] Skill %s attempt %d failed: %v", skill.ID, attempt+1, err)
 
 		// 如果是上下文超时等错误，不重试
 		if strings.Contains(err.Error(), "context") {
@@ -397,6 +397,6 @@ func (p *SkillPlanner) executeSkill(ctx context.Context, skill types.Skill, inpu
 	}
 
 	latency := time.Since(start).Milliseconds()
-	log.Errorf("[SkillPlanner] Skill %s failed after %d attempts, latency=%dms, last error: %v", skill.ID, maxRetries+1, latency, lastErr)
+	log.Errorf(ctx, "[SkillPlanner] Skill %s failed after %d attempts, latency=%dms, last error: %v", skill.ID, maxRetries+1, latency, lastErr)
 	return nil, fmt.Errorf("skill %s execution failed after %d attempts: %w", skill.ID, maxRetries+1, lastErr)
 }

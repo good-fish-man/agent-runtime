@@ -85,7 +85,7 @@ func (a *Adapter) InvokableRun(ctx context.Context, input string, opts ...tool.O
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = log.NewError(operation, "panic: %v", recovered)
-			log.ErrorfCtx(ctx, "tool call panic tool=%s error=%v\n%s", name, recovered, debug.Stack())
+			log.Errorf(ctx, "tool call panic tool=%s error=%v\n%s", name, recovered, debug.Stack())
 		}
 		span.End(err, "output_bytes", len(result))
 	}()

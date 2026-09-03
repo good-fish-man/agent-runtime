@@ -106,11 +106,53 @@ var (
 		"长期目标", "长期任务", "跨天执行", "跨设备继续", "后台继续", "持续执行这个目标", "稍后恢复", "断线恢复", "重启后继续",
 		"persistent goal", "long-running goal", "long running goal", "continue over days", "continue across devices", "keep working in the background", "resume later", "resume after restart",
 	}
+	contextualMediaReplyKeywords = []string{
+		"ok", "okay", "yes", "no", "done", "stop", "cancel", "thanks", "thank you",
+		"好的", "好", "是", "不是", "可以", "不用", "完成", "停止", "取消", "谢谢", "謝謝",
+	}
+	informationalRequestKeywords = []string{
+		"应该怎么", "應該怎麼", "怎么办", "怎麼辦", "怎么做", "怎麼做", "如何办理", "如何辦理", "如何申请", "如何申請", "需要什么", "需要什麼", "需要哪些", "为什么", "為什麼", "是什么", "是什麼", "能否", "是否可以", "有哪些要求", "有什么要求", "有什麼要求",
+		"how do i", "how can i", "how should i", "what should i", "what do i need", "do i need", "can i convert", "can i apply", "what are the requirements", "what is required", "where should i", "why does", "why is",
+	}
+	politeBrowserActionPrefixes = []string{
+		"请打开", "請打開", "帮我打开", "幫我打開", "请点击", "請點擊", "帮我点击", "幫我點擊", "请播放", "請播放", "帮我播放", "幫我播放",
+		"请登录", "請登錄", "帮我登录", "幫我登錄", "可以帮我登录", "可以幫我登錄", "请下载", "請下載", "帮我下载", "幫我下載", "请截图", "請截圖", "帮我截图", "幫我截圖", "请关闭", "請關閉", "帮我关闭", "幫我關閉",
+		"please open ", "please click ", "please play ", "please sign in ", "please log in ", "please download ", "please capture ", "please close ",
+		"can you open ", "could you open ", "can you click ", "could you click ", "can you play ", "could you play ", "can you sign in ", "could you sign in ", "can you log in ", "could you log in ", "can you download ", "could you download ", "can you close ", "could you close ",
+	}
+	conversationRequestPrefixes = []string{
+		"帮我", "幫我", "请", "請", "告诉我", "告訴我", "解释", "解釋", "介绍", "介紹", "写一个", "寫一個", "创建", "創建", "生成", "总结", "總結", "翻译", "翻譯", "推荐", "推薦", "给我", "給我", "我想", "我是", "我有",
+		"tell me ", "explain ", "describe ", "help me ", "write ", "create ", "make ", "generate ", "summarize ", "translate ", "recommend ", "give me ", "list ", "i want ", "i am ", "i have ",
+	}
+	greetingKeywords = []string{"hi", "hello", "hey", "你好", "您好", "嗨", "谢谢", "thank you", "thanks"}
 )
 
+// Parser applies the built-in compatibility rules plus one locale-specific
+// language pack selected from its catalog.
+type Parser struct {
+	catalog *Catalog
+}
+
+// NewParser creates an immutable, concurrency-safe parser.
+func NewParser(catalog *Catalog) *Parser {
+	return &Parser{catalog: catalog}
+}
+
+var defaultParser = NewParser(nil)
+
+// Parse preserves the package-level API for callers that only need the
+// built-in Chinese and English compatibility rules.
 func Parse(request Request) Intent {
+	return defaultParser.Parse(request)
+}
+
+// Parse classifies one request using the language pack selected by Locale.
+func (p *Parser) Parse(request Request) Intent {
 	goal := strings.TrimSpace(request.Text)
 	normalized := strings.ToLower(goal)
+	matches := func(category keywordCategory, builtIn []string) bool {
+		return p.matches(normalized, request.Locale, category, builtIn)
+	}
 	result := Intent{Goal: goal, Normalized: normalized, Mode: ModeChat, Confidence: 0.5}
 	seenSignals := make(map[Signal]bool)
 	seenDomains := make(map[Domain]bool)
@@ -131,22 +173,22 @@ func Parse(request Request) Intent {
 		addSignal(SignalUploadedFile)
 		addDomain(DomainFile)
 	}
-	localDeviceFile := matchesAny(normalized, localFileSearchKeywords) ||
-		(matchesAny(normalized, localFileActionKeywords) && matchesAny(normalized, localFilePlaceKeywords) && matchesAny(normalized, localFileObjectKeywords))
+	localDeviceFile := matches(categoryLocalFileSearch, localFileSearchKeywords) ||
+		(matches(categoryLocalFileAction, localFileActionKeywords) && matches(categoryLocalFilePlace, localFilePlaceKeywords) && matches(categoryLocalFileObject, localFileObjectKeywords))
 	if localDeviceFile {
 		addSignal(SignalLocalDeviceFile)
 		addDomain(DomainFile)
 	}
-	if !localDeviceFile && matchesAny(normalized, workspaceReadKeywords) {
+	if !localDeviceFile && matches(categoryWorkspaceRead, workspaceReadKeywords) {
 		addSignal(SignalWorkspaceRead)
 		addDomain(DomainFile)
 	}
-	if matchesAny(normalized, workspaceWriteKeywords) {
+	if matches(categoryWorkspaceWrite, workspaceWriteKeywords) {
 		addSignal(SignalWorkspaceWrite)
 		addDomain(DomainFile)
 		result.Mode = ModeWrite
 	}
-	if matchesAny(normalized, commandKeywords) {
+	if matches(categoryCommand, commandKeywords) {
 		addSignal(SignalCommand)
 		addDomain(DomainFile)
 		if result.Mode != ModeWrite {
@@ -154,23 +196,23 @@ func Parse(request Request) Intent {
 		}
 	}
 
-	informationalRequest := isInformationalRequest(goal)
-	openTarget := matchesAny(normalized, openActionKeywords) && !informationalRequest
-	explicitDesktop := openTarget && matchesAny(normalized, desktopObjectKeywords)
-	webKnowledgeRequest := matchesAny(normalized, webKeywords) || matchesAny(normalized, webTemporalKeywords) || matchesAny(normalized, webMutableFactKeywords) || matchesAny(normalized, webOfficialProcedureKeywords) || matchesAny(normalized, webRecommendationKeywords) || matchesAny(normalized, researchPlanningKeywords) ||
-		(matchesAny(normalized, webQuestionKeywords) && matchesAny(normalized, webExternalKnowledgeKeywords))
-	browserAction := matchesAny(normalized, browserActionKeywords)
-	directBrowser := browserAction && matchesAny(normalized, browserObjectKeywords) && !informationalRequest
+	informationalRequest := p.isInformationalRequest(goal, request.Locale)
+	openTarget := matches(categoryOpenAction, openActionKeywords) && !informationalRequest
+	explicitDesktop := openTarget && matches(categoryDesktopObject, desktopObjectKeywords)
+	webKnowledgeRequest := matches(categoryWeb, webKeywords) || matches(categoryWebTemporal, webTemporalKeywords) || matches(categoryWebMutableFact, webMutableFactKeywords) || matches(categoryWebOfficialProcedure, webOfficialProcedureKeywords) || matches(categoryWebRecommendation, webRecommendationKeywords) || matches(categoryResearchPlanning, researchPlanningKeywords) ||
+		(matches(categoryWebQuestion, webQuestionKeywords) && matches(categoryWebExternalKnowledge, webExternalKnowledgeKeywords))
+	browserAction := matches(categoryBrowserAction, browserActionKeywords)
+	directBrowser := browserAction && matches(categoryBrowserObject, browserObjectKeywords) && !informationalRequest
 	workspaceTarget := result.HasSignal(SignalWorkspaceRead) || result.HasSignal(SignalWorkspaceWrite) || result.HasSignal(SignalCommand) || localDeviceFile
 	activeBrowserContinuation := request.ActiveBrowserSession && browserAction && !informationalRequest && !explicitDesktop && !workspaceTarget &&
-		(matchesAny(normalized, browserFollowUpKeywords) || (!webKnowledgeRequest && hasRecentBrowserControl(request.PreviousUserMessages)))
+		(matches(categoryBrowserFollowUp, browserFollowUpKeywords) || (!webKnowledgeRequest && p.hasRecentBrowserControl(request.PreviousUserMessages, request.Locale)))
 	if activeBrowserContinuation {
 		directBrowser = true
 	}
-	if request.ActiveBrowserSession && matchesAny(normalized, browserObservationKeywords) && hasRecentBrowserControl(request.PreviousUserMessages) {
+	if request.ActiveBrowserSession && matches(categoryBrowserObservation, browserObservationKeywords) && p.hasRecentBrowserControl(request.PreviousUserMessages, request.Locale) {
 		directBrowser = true
 	}
-	contextualMediaTitle := !directBrowser && request.ActiveBrowserSession && isContextualMediaTitle(goal, request.PreviousUserMessages)
+	contextualMediaTitle := !directBrowser && request.ActiveBrowserSession && p.isContextualMediaTitle(goal, request.PreviousUserMessages, request.Locale)
 	if contextualMediaTitle {
 		directBrowser = true
 	}
@@ -189,25 +231,25 @@ func Parse(request Request) Intent {
 		addDomain(DomainBrowser)
 		result.Mode = ModeExecute
 	}
-	if !informationalRequest && matchesAny(normalized, browserAuthenticationKeywords) {
+	if !informationalRequest && matches(categoryBrowserAuthentication, browserAuthenticationKeywords) {
 		addSignal(SignalBrowserAuthentication)
 		addDomain(DomainBrowser)
 	}
-	if !informationalRequest && matchesAny(normalized, browserDownloadKeywords) {
+	if !informationalRequest && matches(categoryBrowserDownload, browserDownloadKeywords) {
 		addSignal(SignalBrowserDownload)
 		addDomain(DomainBrowser)
 	}
-	if !informationalRequest && matchesAny(normalized, browserScreenshotKeywords) {
+	if !informationalRequest && matches(categoryBrowserScreenshot, browserScreenshotKeywords) {
 		addSignal(SignalBrowserScreenshot)
 		addDomain(DomainBrowser)
 	}
-	if !informationalRequest && matchesAny(normalized, browserCloseKeywords) {
+	if !informationalRequest && matches(categoryBrowserClose, browserCloseKeywords) {
 		addSignal(SignalBrowserClose)
 		addDomain(DomainBrowser)
 	}
 
 	webAccess := webKnowledgeRequest
-	if !webAccess && !directBrowser && !openTarget && !localDeviceFile && !explicitDesktop && isResearchRefinement(goal, request.PreviousUserMessages) {
+	if !webAccess && !directBrowser && !openTarget && !localDeviceFile && !explicitDesktop && p.isResearchRefinement(goal, request.PreviousUserMessages, request.Locale) {
 		webAccess = true
 		addSignal(SignalContextualResearch)
 	}
@@ -218,26 +260,26 @@ func Parse(request Request) Intent {
 			result.Mode = ModeResearch
 		}
 	}
-	if matchesAny(normalized, planKeywords) || matchesAny(normalized, researchPlanningKeywords) {
+	if matches(categoryPlan, planKeywords) || matches(categoryResearchPlanning, researchPlanningKeywords) {
 		addSignal(SignalPlanning)
 		addDomain(DomainPlanning)
 		if !webAccess && result.Mode == ModeChat {
 			result.Mode = ModePlan
 		}
 	}
-	if matchesAny(normalized, taskKeywords) {
+	if matches(categoryTask, taskKeywords) {
 		addSignal(SignalTaskManagement)
 		addDomain(DomainTask)
 	}
-	if matchesAny(normalized, waitKeywords) {
+	if matches(categoryWait, waitKeywords) {
 		addSignal(SignalWait)
 	}
-	if !informationalRequest && matchesAny(normalized, scheduledTaskKeywords) {
+	if !informationalRequest && matches(categoryScheduledTask, scheduledTaskKeywords) {
 		addSignal(SignalScheduled)
 		addDomain(DomainAutomation)
 		result.Mode = ModeExecute
 	}
-	if matchesAny(normalized, persistentGoalKeywords) {
+	if matches(categoryPersistentGoal, persistentGoalKeywords) {
 		addSignal(SignalPersistentGoal)
 		addDomain(DomainOrchestration)
 		addDomain(DomainPlanning)
@@ -277,13 +319,13 @@ func confidence(parsed Intent) float64 {
 	}
 }
 
-func isResearchRefinement(goal string, previous []string) bool {
+func (p *Parser) isResearchRefinement(goal string, previous []string, locale string) bool {
 	goal = strings.TrimSpace(goal)
-	if goal == "" || len([]rune(goal)) > 80 || isGreeting(goal) {
+	if goal == "" || len([]rune(goal)) > 80 || p.isGreeting(goal, locale) {
 		return false
 	}
 	for index := len(previous) - 1; index >= 0; index-- {
-		prior := Parse(Request{Text: previous[index]})
+		prior := p.Parse(Request{Text: previous[index], Locale: locale})
 		if prior.HasSignal(SignalWebAccess) {
 			return true
 		}
@@ -295,14 +337,14 @@ func isResearchRefinement(goal string, previous []string) bool {
 // the active conversation is already controlling media in the browser. This
 // keeps names such as "Adele Hello" out of the general browser route while
 // allowing natural follow-ups that omit "search", "open", or "play".
-func isContextualMediaTitle(goal string, previous []string) bool {
+func (p *Parser) isContextualMediaTitle(goal string, previous []string, locale string) bool {
 	goal = strings.TrimSpace(goal)
 	if goal == "" || len([]rune(goal)) > 160 || strings.ContainsAny(goal, "\r\n") || urlPattern.MatchString(goal) {
 		return false
 	}
 	normalized := strings.ToLower(goal)
-	if matchesAny(normalized, browserActionKeywords) || isContextualMediaReply(normalized) || isGreeting(normalized) || isInformationalRequest(goal) || looksLikeConversationRequest(normalized) ||
-		looksLikeDetailedRequest(goal) || matchesAny(normalized, webOfficialProcedureKeywords) {
+	if p.matches(normalized, locale, categoryBrowserAction, browserActionKeywords) || p.isContextualMediaReply(normalized, locale) || p.isGreeting(normalized, locale) || p.isInformationalRequest(goal, locale) || p.looksLikeConversationRequest(normalized, locale) ||
+		looksLikeDetailedRequest(goal) || p.matches(normalized, locale, categoryWebOfficialProcedure, webOfficialProcedureKeywords) {
 		return false
 	}
 
@@ -313,9 +355,9 @@ func isContextualMediaTitle(goal string, previous []string) bool {
 			continue
 		}
 		inspected++
-		prior := Parse(Request{Text: priorText})
+		prior := p.Parse(Request{Text: priorText, Locale: locale})
 		if prior.HasSignal(SignalDirectBrowserControl) {
-			return matchesAny(strings.ToLower(priorText), browserMediaContextKeywords)
+			return p.matches(strings.ToLower(priorText), locale, categoryBrowserMediaContext, browserMediaContextKeywords)
 		}
 		if prior.HasSignal(SignalWebAccess) || prior.HasSignal(SignalWorkspaceWrite) || prior.HasSignal(SignalWorkspaceRead) ||
 			prior.HasSignal(SignalLocalDeviceFile) || prior.HasSignal(SignalExplicitDesktop) || prior.HasSignal(SignalScheduled) {
@@ -325,7 +367,7 @@ func isContextualMediaTitle(goal string, previous []string) bool {
 	return false
 }
 
-func hasRecentBrowserControl(previous []string) bool {
+func (p *Parser) hasRecentBrowserControl(previous []string, locale string) bool {
 	inspected := 0
 	for index := len(previous) - 1; index >= 0 && inspected < 4; index-- {
 		priorText := strings.TrimSpace(previous[index])
@@ -333,7 +375,7 @@ func hasRecentBrowserControl(previous []string) bool {
 			continue
 		}
 		inspected++
-		prior := Parse(Request{Text: priorText})
+		prior := p.Parse(Request{Text: priorText, Locale: locale})
 		if prior.HasSignal(SignalDirectBrowserControl) {
 			return true
 		}
@@ -345,50 +387,23 @@ func hasRecentBrowserControl(previous []string) bool {
 	return false
 }
 
-func isContextualMediaReply(value string) bool {
-	value = strings.TrimSpace(value)
-	for _, reply := range []string{
-		"ok", "okay", "yes", "no", "done", "stop", "cancel", "thanks", "thank you",
-		"好的", "好", "是", "不是", "可以", "不用", "完成", "停止", "取消", "谢谢", "謝謝",
-	} {
-		if value == reply {
-			return true
-		}
-	}
-	return false
+func (p *Parser) isContextualMediaReply(value, locale string) bool {
+	return p.matchesExact(value, locale, categoryContextualMediaReply, contextualMediaReplyKeywords)
 }
 
-func isInformationalRequest(value string) bool {
+func (p *Parser) isInformationalRequest(value, locale string) bool {
 	value = strings.TrimSpace(strings.ToLower(value))
-	if value == "" || isPoliteBrowserActionRequest(value) {
+	if value == "" || p.isPoliteBrowserActionRequest(value, locale) {
 		return false
 	}
 	if strings.ContainsAny(value, "?？") {
 		return true
 	}
-	for _, marker := range []string{
-		"应该怎么", "應該怎麼", "怎么办", "怎麼辦", "怎么做", "怎麼做", "如何办理", "如何辦理", "如何申请", "如何申請", "需要什么", "需要什麼", "需要哪些", "为什么", "為什麼", "是什么", "是什麼", "能否", "是否可以", "有哪些要求", "有什么要求", "有什麼要求",
-		"how do i", "how can i", "how should i", "what should i", "what do i need", "do i need", "can i convert", "can i apply", "what are the requirements", "what is required", "where should i", "why does", "why is",
-	} {
-		if strings.Contains(value, marker) {
-			return true
-		}
-	}
-	return false
+	return p.matches(value, locale, categoryInformationalRequest, informationalRequestKeywords)
 }
 
-func isPoliteBrowserActionRequest(value string) bool {
-	for _, prefix := range []string{
-		"请打开", "請打開", "帮我打开", "幫我打開", "请点击", "請點擊", "帮我点击", "幫我點擊", "请播放", "請播放", "帮我播放", "幫我播放",
-		"请登录", "請登錄", "帮我登录", "幫我登錄", "可以帮我登录", "可以幫我登錄", "请下载", "請下載", "帮我下载", "幫我下載", "请截图", "請截圖", "帮我截图", "幫我截圖", "请关闭", "請關閉", "帮我关闭", "幫我關閉",
-		"please open ", "please click ", "please play ", "please sign in ", "please log in ", "please download ", "please capture ", "please close ",
-		"can you open ", "could you open ", "can you click ", "could you click ", "can you play ", "could you play ", "can you sign in ", "could you sign in ", "can you log in ", "could you log in ", "can you download ", "could you download ", "can you close ", "could you close ",
-	} {
-		if strings.HasPrefix(value, prefix) {
-			return true
-		}
-	}
-	return false
+func (p *Parser) isPoliteBrowserActionRequest(value, locale string) bool {
+	return p.matchesPrefix(value, locale, categoryPoliteBrowserActionPrefix, politeBrowserActionPrefixes)
 }
 
 func looksLikeDetailedRequest(value string) bool {
@@ -396,24 +411,53 @@ func looksLikeDetailedRequest(value string) bool {
 	return runeCount > 80 || (runeCount > 20 && strings.ContainsAny(value, "，,。；;！!"))
 }
 
-func looksLikeConversationRequest(value string) bool {
+func (p *Parser) looksLikeConversationRequest(value, locale string) bool {
 	value = strings.TrimSpace(strings.ToLower(value))
-	for _, prefix := range []string{
-		"帮我", "幫我", "请", "請", "告诉我", "告訴我", "解释", "解釋", "介绍", "介紹", "写一个", "寫一個", "创建", "創建", "生成", "总结", "總結", "翻译", "翻譯", "推荐", "推薦", "给我", "給我", "我想", "我是", "我有",
-		"tell me ", "explain ", "describe ", "help me ", "write ", "create ", "make ", "generate ", "summarize ", "translate ", "recommend ", "give me ", "list ", "i want ", "i am ", "i have ",
-	} {
-		if strings.HasPrefix(value, prefix) {
+	return p.matchesPrefix(value, locale, categoryConversationRequestPrefix, conversationRequestPrefixes)
+}
+
+func (p *Parser) isGreeting(value, locale string) bool {
+	return p.matchesExact(value, locale, categoryGreeting, greetingKeywords)
+}
+
+func (p *Parser) matches(value, locale string, category keywordCategory, builtIn []string) bool {
+	if matchesAny(value, builtIn) {
+		return true
+	}
+	if p == nil {
+		return false
+	}
+	return matchesAny(value, p.catalog.keywords(locale, category))
+}
+
+func (p *Parser) matchesExact(value, locale string, category keywordCategory, builtIn []string) bool {
+	value = strings.TrimSpace(strings.ToLower(value))
+	for _, candidate := range builtIn {
+		if value == candidate {
 			return true
+		}
+	}
+	if p != nil {
+		for _, candidate := range p.catalog.keywords(locale, category) {
+			if value == candidate {
+				return true
+			}
 		}
 	}
 	return false
 }
 
-func isGreeting(value string) bool {
-	value = strings.TrimSpace(strings.ToLower(value))
-	for _, greeting := range []string{"hi", "hello", "hey", "你好", "您好", "嗨", "谢谢", "thank you", "thanks"} {
-		if value == greeting {
+func (p *Parser) matchesPrefix(value, locale string, category keywordCategory, builtIn []string) bool {
+	for _, prefix := range builtIn {
+		if strings.HasPrefix(value, prefix) {
 			return true
+		}
+	}
+	if p != nil {
+		for _, prefix := range p.catalog.keywords(locale, category) {
+			if strings.HasPrefix(value, prefix) {
+				return true
+			}
 		}
 	}
 	return false
@@ -440,6 +484,9 @@ func tokenSet(text string) map[string]bool {
 	result := make(map[string]bool)
 	for _, token := range latinTokenPattern.FindAllString(strings.ToLower(text), -1) {
 		result[token] = true
+		if normalized := strings.Trim(token, "._-"); normalized != "" {
+			result[normalized] = true
+		}
 	}
 	return result
 }

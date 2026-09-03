@@ -92,7 +92,7 @@ func (t *ImageGenerationTool) generate(ctx context.Context, request ImageGenerat
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = log.NewError("ImageGenerationTool.generate", "panic: %v", recovered)
-			log.ErrorfCtx(ctx, "model call panic model=%s mode=image_generate error=%v\n%s", t.model.Name, recovered, debug.Stack())
+			log.Errorf(ctx, "model call panic model=%s mode=image_generate error=%v\n%s", t.model.Name, recovered, debug.Stack())
 		} else if err != nil {
 			err = log.WrapError(err, "ImageGenerationTool.generate")
 		}

@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +15,7 @@ import (
 // skill's SKILL.md on disk when available) and then augments the set with any
 // skills auto-discovered under skillsDir. Request skills take precedence over
 // discovered skills with the same ID.
-func LoadSkills(reqSkills []types.Skill, skillsDir string) []types.Skill {
+func LoadSkills(ctx context.Context, reqSkills []types.Skill, skillsDir string) []types.Skill {
 	var skills []types.Skill
 
 	for _, s := range reqSkills {
@@ -30,7 +31,7 @@ func LoadSkills(reqSkills []types.Skill, skillsDir string) []types.Skill {
 
 	if skillsDir != "" {
 		if _, err := os.Stat(skillsDir); err == nil {
-			for _, ds := range DiscoverSkillsFromDir(skillsDir) {
+			for _, ds := range DiscoverSkillsFromDir(ctx, skillsDir) {
 				exists := false
 				for _, s := range skills {
 					if s.ID == ds.ID {
@@ -69,12 +70,12 @@ func MergeSkills(base []types.Skill, extras []types.Skill) []types.Skill {
 // DiscoverSkillsFromDir scans a directory for skill folders. Each immediate
 // subdirectory that contains a SKILL.md is registered as a skill; its metadata
 // is derived from the SKILL.md YAML frontmatter and its layout on disk.
-func DiscoverSkillsFromDir(dir string) []types.Skill {
+func DiscoverSkillsFromDir(ctx context.Context, dir string) []types.Skill {
 	var discovered []types.Skill
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		log.Warnf("[DiscoverSkillsFromDir] failed to read skills dir: %v", err)
+		log.Warnf(ctx, "[DiscoverSkillsFromDir] failed to read skills dir: %v", err)
 		return discovered
 	}
 
@@ -120,7 +121,7 @@ func DiscoverSkillsFromDir(dir string) []types.Skill {
 		}
 
 		discovered = append(discovered, skill)
-		log.Infof("[DiscoverSkillsFromDir] discovered skill: %s (name=%s, entry=%s)", skill.ID, skill.Name, skill.EntryScript)
+		log.Infof(ctx, "[DiscoverSkillsFromDir] discovered skill: %s (name=%s, entry=%s)", skill.ID, skill.Name, skill.EntryScript)
 	}
 
 	return discovered

@@ -18,14 +18,12 @@ func UnaryTraceInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (response any, err error) {
 		traceID := resolveTraceID(ctx, requestTraceID(req))
 		ctx = log.WithReqID(ctx, traceID)
-		release := log.BindCtx(ctx)
-		defer release()
 		started := time.Now()
-		log.InfowCtx(ctx, "grpc request started", "method", info.FullMethod)
+		log.Infow(ctx, "grpc request started", "method", info.FullMethod)
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				err = log.GRPCError(log.NewError("server.UnaryTraceInterceptor.panic", "panic: %v", recovered), codes.Internal, "server.UnaryTraceInterceptor", "")
-				log.ErrorfCtx(ctx, "grpc panic method=%s err=%v\n%s", info.FullMethod, recovered, debug.Stack())
+				log.Errorf(ctx, "grpc panic method=%s err=%v\n%s", info.FullMethod, recovered, debug.Stack())
 			}
 			logGRPCCompletion(ctx, info.FullMethod, time.Since(started), err)
 			err = errorForGRPCTransport(err)
@@ -42,14 +40,12 @@ func StreamTraceInterceptor() grpc.StreamServerInterceptor {
 		ctx := stream.Context()
 		traceID := resolveTraceID(ctx, "")
 		ctx = log.WithReqID(ctx, traceID)
-		release := log.BindCtx(ctx)
-		defer release()
 		started := time.Now()
-		log.InfowCtx(ctx, "grpc stream started", "method", info.FullMethod)
+		log.Infow(ctx, "grpc stream started", "method", info.FullMethod)
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				err = log.GRPCError(log.NewError("server.StreamTraceInterceptor.panic", "panic: %v", recovered), codes.Internal, "server.StreamTraceInterceptor", "")
-				log.ErrorfCtx(ctx, "grpc stream panic method=%s err=%v\n%s", info.FullMethod, recovered, debug.Stack())
+				log.Errorf(ctx, "grpc stream panic method=%s err=%v\n%s", info.FullMethod, recovered, debug.Stack())
 			}
 			logGRPCCompletion(ctx, info.FullMethod, time.Since(started), err)
 			err = errorForGRPCTransport(err)
@@ -84,15 +80,15 @@ func logGRPCCompletion(ctx context.Context, method string, elapsed time.Duration
 	code := status.Code(err)
 	kv := []any{"method", method, "code", code.String(), "cost_ms", elapsed.Milliseconds()}
 	if err == nil {
-		log.InfowCtx(ctx, "grpc request completed", kv...)
+		log.Infow(ctx, "grpc request completed", kv...)
 		return
 	}
 	kv = append(kv, "error_chain", log.FormatError(err))
 	if code == codes.InvalidArgument || code == codes.NotFound || code == codes.Unauthenticated || code == codes.PermissionDenied {
-		log.WarnwCtx(ctx, "grpc request rejected", kv...)
+		log.Warnw(ctx, "grpc request rejected", kv...)
 		return
 	}
-	log.ErrorwCtx(ctx, "grpc request failed", kv...)
+	log.Errorw(ctx, "grpc request failed", kv...)
 }
 
 type traceServerStream struct {

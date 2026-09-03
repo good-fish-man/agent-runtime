@@ -45,15 +45,15 @@ func NewKnowledgeRetriever(configs []KnowledgeBaseConfig) *KnowledgeRetriever {
 func (kr *KnowledgeRetriever) Retrieve(ctx context.Context, query string) ([]*schema.Document, error) {
 	var docs []*schema.Document
 
-	log.Infof("[KnowledgeRetriever] Retrieve: query=%s, configs count=%d", query, len(kr.configs))
+	log.Infof(ctx, "[KnowledgeRetriever] Retrieve: query=%s, configs count=%d", query, len(kr.configs))
 	for _, cfg := range kr.configs {
-		log.Infof("[KnowledgeRetriever] Retrieve: querying KB %s, url=%s", cfg.Name, cfg.RetrievalURL)
+		log.Infof(ctx, "[KnowledgeRetriever] Retrieve: querying KB %s, url=%s", cfg.Name, cfg.RetrievalURL)
 		kbDocs, err := kr.retrieveFromKB(ctx, cfg, query)
 		if err != nil {
-			log.Warnf("[KnowledgeRetriever] retrieve from KB %s failed: %v", cfg.Name, err)
+			log.Warnf(ctx, "[KnowledgeRetriever] retrieve from KB %s failed: %v", cfg.Name, err)
 			continue
 		}
-		log.Infof("[KnowledgeRetriever] Retrieve: got %d docs from KB %s", len(kbDocs), cfg.Name)
+		log.Infof(ctx, "[KnowledgeRetriever] Retrieve: got %d docs from KB %s", len(kbDocs), cfg.Name)
 		docs = append(docs, kbDocs...)
 	}
 

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	runtimev1 "github.com/good-fish-man/agent-runtime/gen/agent/runtime/v1"
 	"github.com/good-fish-man/agent-runtime/internal/dispatcher"
 	"github.com/good-fish-man/agent-runtime/internal/eino"
@@ -10,15 +11,15 @@ import (
 
 // newRunDispatcher builds a Dispatcher for a RunRequest, mapping the gRPC
 // request into the orchestration-facing types.RunRequest.
-func (s *Server) newRunDispatcher(client *eino.Client, req *runtimev1.RunRequest, memInstruction string) *dispatcher.Dispatcher {
+func (s *Server) newRunDispatcher(ctx context.Context, client *eino.Client, req *runtimev1.RunRequest, memInstruction string) *dispatcher.Dispatcher {
 	tr := toTypesRunRequest(req)
-	return dispatcher.New(client, tr, projectDir(req.GetContext()), memInstruction, s.cfg.Dispatch)
+	return dispatcher.New(ctx, client, tr, projectDir(req.GetContext()), memInstruction, s.cfg.Dispatch)
 }
 
 // newAgentDispatcher builds a Dispatcher for an AgentRequest. Autonomous task
 // requests carry no rich orchestration config, so only built-in and retrieval
 // tools are wired.
-func (s *Server) newAgentDispatcher(client *eino.Client, req *runtimev1.AgentRequest, memInstruction string) *dispatcher.Dispatcher {
+func (s *Server) newAgentDispatcher(ctx context.Context, client *eino.Client, req *runtimev1.AgentRequest, memInstruction string) *dispatcher.Dispatcher {
 	tr := &types.RunRequest{Models: make(map[string]types.ModelConfig)}
 	if req.GetContext() != nil {
 		tr.Context = req.GetContext().AsMap()
@@ -46,7 +47,7 @@ func (s *Server) newAgentDispatcher(client *eino.Client, req *runtimev1.AgentReq
 			SHA256: visual.GetSha256(), Purpose: visual.GetPurpose(), Detail: visual.GetDetail(),
 		})
 	}
-	return dispatcher.New(client, tr, projectDir(req.GetContext()), memInstruction, s.cfg.Dispatch)
+	return dispatcher.New(ctx, client, tr, projectDir(req.GetContext()), memInstruction, s.cfg.Dispatch)
 }
 
 // toTypesRunRequest maps the subset of gRPC RunRequest fields consumed by the

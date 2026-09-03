@@ -70,6 +70,14 @@ const (
 	EnvOperationsMaxQueue          = "ATHENA_OPERATIONS_MAX_QUEUE"
 	EnvOperationsAdmissionWaitMS   = "ATHENA_OPERATIONS_ADMISSION_WAIT_MS"
 	EnvOperationsRequestTimeoutSec = "ATHENA_OPERATIONS_REQUEST_TIMEOUT_SEC"
+	EnvDBEnabled                   = "ATHENA_DB_ENABLED"
+	EnvDBType                      = "ATHENA_DB_TYPE"
+	EnvDBHost                      = "ATHENA_DB_HOST"
+	EnvDBPort                      = "ATHENA_DB_PORT"
+	EnvDBUser                      = "ATHENA_DB_USER"
+	EnvDBPassword                  = "ATHENA_DB_PASSWORD"
+	EnvDBName                      = "ATHENA_DB_NAME"
+	EnvDBSSLMode                   = "ATHENA_DB_SSL_MODE"
 	// EnvConfigPath points to the YAML config file (db + memory sections).
 	EnvConfigPath = "AGENT_RUNTIME_CONFIG"
 )

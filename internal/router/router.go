@@ -108,19 +108,5 @@ func addBrowserExecutionCapabilities(add func(...string)) {
 }
 
 func allBrowserCapabilities() []string {
-	return []string{
-		capability.BrowserSearch,
-		capability.BrowserTask,
-		capability.BrowserOpen,
-		capability.BrowserNavigate,
-		capability.BrowserLogin,
-		capability.BrowserRead,
-		capability.BrowserObserve,
-		capability.BrowserAction,
-		capability.BrowserWait,
-		capability.BrowserDownload,
-		capability.BrowserScreenshot,
-		capability.BrowserAutomation,
-		capability.BrowserClose,
-	}
+	return capability.BrowserIDs()
 }

@@ -25,10 +25,11 @@ var httpTraceResponseHeaders = []string{
 }
 
 func traceIDFromHTTP(r *http.Request) string {
-	if r != nil {
-		if value, ok := r.Context().Value(log.ReqIDKey).(string); ok && value != "" {
-			return value
-		}
+	if r == nil {
+		return ""
+	}
+	if value := log.ReqID(r.Context()); value != "" {
+		return value
 	}
 	for _, header := range httpTraceHeaderCandidates {
 		raw := strings.TrimSpace(r.Header.Get(header))

@@ -158,7 +158,7 @@ func loadTrustStore(path string) (map[string]ed25519.PublicKey, error) {
 	if err := decodeStrict(data, &store); err != nil {
 		return nil, fmt.Errorf("parse provider trust store: %w", err)
 	}
-	if store.Schema != "athena.plugin-trust.v1" {
+	if store.Schema != pluginv1.TrustStoreSchema {
 		return nil, fmt.Errorf("unsupported provider trust store schema")
 	}
 	result := make(map[string]ed25519.PublicKey, len(store.Keys))

@@ -186,6 +186,13 @@ func TestParsePoliteExplicitBrowserCommand(t *testing.T) {
 	}
 }
 
+func TestParseBrowserCommandWithSentenceFinalPeriod(t *testing.T) {
+	parsed := Parse(Request{Text: "Open https://example.com/ in the browser."})
+	if !parsed.HasSignal(SignalDirectBrowserControl) || parsed.Mode != ModeExecute || !parsed.HasDomain(DomainBrowser) {
+		t.Fatalf("sentence-final punctuation changed browser command intent: %+v", parsed)
+	}
+}
+
 func TestParseBrowserHowToQuestionDoesNotExecuteDeviceAction(t *testing.T) {
 	for _, prompt := range []string{"如何打开 Chrome 浏览器？", "这个网页应该怎么登录？", "在哪里下载这个文件？", "怎么关闭浏览器？"} {
 		parsed := Parse(Request{Text: prompt, ActiveBrowserSession: true})

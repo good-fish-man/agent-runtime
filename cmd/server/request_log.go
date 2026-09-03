@@ -65,10 +65,10 @@ func requestLogger(next http.Handler) http.Handler {
 		request = request.WithContext(ctx)
 		writeTraceHeaders(response, traceID)
 		writer := &responseStatusWriter{ResponseWriter: response, status: http.StatusOK}
-		log.InfowCtx(ctx, "http request started", "method", request.Method, "path", request.URL.EscapedPath(), "query", request.URL.RawQuery)
+		log.Infow(ctx, "http request started", "method", request.Method, "path", request.URL.EscapedPath(), "query", request.URL.RawQuery)
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				log.ErrorfCtx(ctx, "http panic method=%s path=%s err=%v\n%s", request.Method, request.URL.RequestURI(), recovered, debug.Stack())
+				log.Errorf(ctx, "http panic method=%s path=%s err=%v\n%s", request.Method, request.URL.RequestURI(), recovered, debug.Stack())
 				if !writer.wroteHeader {
 					http.Error(writer, "internal server error", http.StatusInternalServerError)
 				}
@@ -82,7 +82,7 @@ func requestLogger(next http.Handler) http.Handler {
 func logHTTPCompletion(ctx context.Context, request *http.Request, writer *responseStatusWriter, elapsed time.Duration) {
 	kv := []any{"method", request.Method, "path", request.URL.EscapedPath(), "query", request.URL.RawQuery, "status", writer.status, "bytes", writer.bytes, "cost_ms", elapsed.Milliseconds()}
 	if writer.status < http.StatusBadRequest {
-		log.InfowCtx(ctx, "http request completed", kv...)
+		log.Infow(ctx, "http request completed", kv...)
 		return
 	}
 	kv = append(kv, "response", string(bytes.TrimSpace(writer.body.Bytes())))
@@ -90,8 +90,8 @@ func logHTTPCompletion(ctx context.Context, request *http.Request, writer *respo
 		kv = append(kv, "error_chain", log.FormatError(writer.err))
 	}
 	if writer.status >= http.StatusInternalServerError {
-		log.ErrorwCtx(ctx, "http request failed", kv...)
+		log.Errorw(ctx, "http request failed", kv...)
 		return
 	}
-	log.WarnwCtx(ctx, "http request rejected", kv...)
+	log.Warnw(ctx, "http request rejected", kv...)
 }

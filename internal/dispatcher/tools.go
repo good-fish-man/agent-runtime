@@ -15,59 +15,42 @@ import (
 
 // buildTools resolves selected capabilities into their internal providers.
 func (d *Dispatcher) buildTools(ctx context.Context, plan athenarouter.RoutePlan) ([]tool.BaseTool, []string) {
-	capabilityIDs := append([]string(nil), plan.Capabilities...)
-	if d.contextString("active_desktop_session") != "" && !containsToolName(capabilityIDs, capability.DesktopAction) {
-		capabilityIDs = append(capabilityIDs, capability.DesktopAction)
+	selected := capability.NewSet(plan.Capabilities...)
+	if d.contextString("active_desktop_session") != "" {
+		selected.Add(capability.DesktopAction)
 	}
 	for _, configured := range d.req.Capabilities {
-		if configured.ID != "" && !containsToolName(capabilityIDs, configured.ID) {
-			capabilityIDs = append(capabilityIDs, configured.ID)
-		}
+		selected.Add(configured.ID)
 	}
-	if len(plan.ExcludedCapabilities) > 0 {
-		capabilityIDs = withoutToolNames(capabilityIDs, plan.ExcludedCapabilities...)
-	}
-	if d.isBackgroundMonitor() {
-		capabilityIDs = readOnlyMonitorCapabilities(capabilityIDs)
-	}
-	if d.contextBool("persistent_goal_execution") {
-		capabilityIDs = withoutToolNames(capabilityIDs, capability.AutomationSchedule, capability.OrchestrationGoal)
-	}
-	if !d.contextBool("desktop_bridge") {
-		capabilityIDs = withoutToolNames(capabilityIDs, capability.DesktopAction)
-	}
-	if !d.contextBool("browser_controller") {
-		capabilityIDs = withoutToolNames(capabilityIDs,
-			capability.BrowserSearch, capability.BrowserTask, capability.BrowserOpen, capability.BrowserLogin, capability.BrowserRead,
-			capability.BrowserNavigate, capability.BrowserObserve, capability.BrowserAction, capability.BrowserClose,
-		)
-	}
-	staticCapabilityIDs := withoutToolNames(capabilityIDs, capability.AutomationSchedule, capability.OrchestrationGoal, capability.ImageGenerate, capability.VideoGenerate)
-	extra, unavailable, err := capability.GlobalRegistry.Resolve(d.workDir, staticCapabilityIDs)
+	d.capabilityPolicy(plan).Apply(selected)
+
+	static := capability.NewSet(selected.IDs()...)
+	static.Remove(capability.AutomationSchedule, capability.OrchestrationGoal, capability.ImageGenerate, capability.VideoGenerate)
+	extra, unavailable, err := capability.GlobalRegistry.Resolve(d.workDir, static.IDs())
 	if err != nil {
-		log.WarnwCtx(ctx, "capability resolution failed", "error", err)
+		log.Warnw(ctx, "capability resolution failed", "error", err)
 	}
 	if len(unavailable) > 0 {
-		log.WarnwCtx(ctx, "capabilities unavailable", "capabilities", unavailable)
+		log.Warnw(ctx, "capabilities unavailable", "capabilities", unavailable)
 	}
-	if containsToolName(capabilityIDs, capability.AutomationSchedule) && !d.isBackgroundMonitor() && !d.contextBool("persistent_goal_execution") {
+	if selected.Contains(capability.AutomationSchedule) {
 		extra = append(extra, d.wrapDynamicCapability(capability.AutomationSchedule,
 			tools.NewScheduledTaskCreateTool(d.contextString("user_id"), d.contextString("agent_id"), d.contextString("session_id"), d.contextString("timezone"))))
 	}
-	if containsToolName(capabilityIDs, capability.OrchestrationGoal) && !d.isBackgroundMonitor() && !d.contextBool("persistent_goal_execution") {
+	if selected.Contains(capability.OrchestrationGoal) {
 		extra = append(extra, d.wrapDynamicCapability(capability.OrchestrationGoal,
 			tools.NewPersistentGoalCreateTool(d.contextString("user_id"), d.contextString("agent_id"), d.contextString("session_id"))))
 	}
 	if d.isBackgroundMonitor() {
-		return extra, availableCapabilityIDs(capabilityIDs)
+		return extra, availableCapabilityIDs(selected.IDs())
 	}
 	if imageModel, ok := d.req.Models["image"]; ok && imageModel.Name != "" {
 		extra = append(extra, d.wrapDynamicCapability(capability.ImageGenerate, tools.NewImageGenerationTool(imageModel)))
-		capabilityIDs = append(capabilityIDs, capability.ImageGenerate)
+		selected.Add(capability.ImageGenerate)
 	}
 	if videoModel, ok := d.req.Models["video"]; ok && videoModel.Name != "" {
 		extra = append(extra, d.wrapDynamicCapability(capability.VideoGenerate, tools.NewVideoGenerationTool(videoModel)))
-		capabilityIDs = append(capabilityIDs, capability.VideoGenerate)
+		selected.Add(capability.VideoGenerate)
 	}
 
 	// Knowledge-base retrieval tool (only when knowledge bases are configured).
@@ -82,7 +65,7 @@ func (d *Dispatcher) buildTools(ctx context.Context, plan athenarouter.RoutePlan
 	// Skill tools (skill execution, load_skill, orchestrate_skills, create_skill).
 	extra = append(extra, d.buildSkillTools(ctx)...)
 
-	names := availableCapabilityIDs(capabilityIDs)
+	names := availableCapabilityIDs(selected.IDs())
 	for _, t := range extra {
 		if info, err := t.Info(ctx); err == nil && info != nil {
 			name := info.Name
@@ -114,17 +97,9 @@ func (d *Dispatcher) contextBool(key string) bool {
 }
 
 func withoutToolNames(names []string, removed ...string) []string {
-	remove := make(map[string]bool, len(removed))
-	for _, name := range removed {
-		remove[name] = true
-	}
-	result := make([]string, 0, len(names))
-	for _, name := range names {
-		if !remove[name] {
-			result = append(result, name)
-		}
-	}
-	return result
+	selected := capability.NewSet(names...)
+	selected.Remove(removed...)
+	return selected.IDs()
 }
 
 func withoutBaseTools(ctx context.Context, values []tool.BaseTool, removed ...string) []tool.BaseTool {
@@ -177,28 +152,59 @@ func containsToolName(names []string, wanted string) bool {
 	}
 	return false
 }
+
+type capabilityPolicy struct {
+	excluded                []string
+	backgroundMonitor       bool
+	persistentGoalExecution bool
+	desktopBridge           bool
+	browserController       bool
+}
+
+func (d *Dispatcher) capabilityPolicy(plan athenarouter.RoutePlan) capabilityPolicy {
+	return capabilityPolicy{
+		excluded:                plan.ExcludedCapabilities,
+		backgroundMonitor:       d.isBackgroundMonitor(),
+		persistentGoalExecution: d.contextBool("persistent_goal_execution"),
+		desktopBridge:           d.contextBool("desktop_bridge"),
+		browserController:       d.contextBool("browser_controller"),
+	}
+}
+
+func (p capabilityPolicy) Apply(selected *capability.Set) {
+	selected.Remove(p.excluded...)
+	if p.backgroundMonitor {
+		applyBackgroundMonitorProfile(selected)
+	}
+	if p.persistentGoalExecution {
+		selected.Remove(capability.AutomationSchedule, capability.OrchestrationGoal)
+	}
+	if !p.desktopBridge {
+		selected.RemoveMatching(capability.IsDesktop)
+	}
+	if !p.browserController {
+		selected.RemoveMatching(capability.IsBrowser)
+	}
+}
+
+var backgroundMonitorCapabilities = capability.NewSet(
+	capability.InternetSearch,
+	capability.InternetFetch,
+	capability.BrowserSearch,
+	capability.BrowserRead,
+	capability.BrowserObserve,
+	capability.BrowserClose,
+)
+
+func applyBackgroundMonitorProfile(selected *capability.Set) {
+	selected.RetainMatching(backgroundMonitorCapabilities.Contains)
+	selected.Add(capability.InternetSearch, capability.InternetFetch)
+}
+
 func readOnlyMonitorCapabilities(names []string) []string {
-	allowed := map[string]bool{
-		capability.InternetSearch: true,
-		capability.InternetFetch:  true,
-		capability.BrowserSearch:  true,
-		capability.BrowserRead:    true,
-		capability.BrowserObserve: true,
-		capability.BrowserClose:   true,
-	}
-	out := make([]string, 0, len(names))
-	for _, name := range names {
-		if allowed[name] {
-			out = append(out, name)
-		}
-	}
-	if !containsToolName(out, capability.InternetSearch) {
-		out = append(out, capability.InternetSearch)
-	}
-	if !containsToolName(out, capability.InternetFetch) {
-		out = append(out, capability.InternetFetch)
-	}
-	return out
+	selected := capability.NewSet(names...)
+	applyBackgroundMonitorProfile(selected)
+	return selected.IDs()
 }
 
 func mapKnowledgeBases(in []types.KnowledgeBaseConfig) []retriever.KnowledgeBaseConfig {

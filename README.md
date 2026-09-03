@@ -4,7 +4,9 @@
 
 GA guide: [Personal Agent OS 1.0 Runtime](doc/personal-agent-os-ga-v1.0.md) | [简体中文](doc/personal-agent-os-ga-v1.0.zh-CN.md)
 
-Architecture: [Agent OS versioned delivery plan v0.2-v1.0](doc/athena-agent-os-version-roadmap-v0.2-v1.0.md) | [Agent OS v0.2 detailed architecture](doc/agent-os-architecture-plan-v0.2.md) | [v0.2 compatibility matrix](doc/v0.2-compatibility-matrix.md) | [v0.2 release readiness](doc/v0.2-release-readiness.md) | [Athena Agent Architecture v2](doc/architecture-v2.md) | [Research Agent v3](doc/research-agent-v3.md) | [Research Agent v2](doc/research-agent-v2.md) | [Personal AI Operating System Specification v1.0](doc/personal-ai-os-spec-v1.md)
+Code guide: [Understand `agent-runtime` by subsystem and package](doc/code-guide/README.md)
+
+Architecture: [Agent OS versioned delivery plan v0.2-v1.0](doc/athena-agent-os-version-roadmap-v0.2-v1.0.md) | [Agent OS v0.2 detailed architecture](doc/agent-os-architecture-plan-v0.2.md) | [Agent OS v0.3 effect-centric architecture](doc/agent-os-architecture-plan-v0.3.md) | [v0.3 evidence review](doc/v0.3-evidence-review.md) | [v0.3 protocol ADR](doc/adr/0001-v0.3-semantics-carriage.md) | [v0.2 compatibility matrix](doc/v0.2-compatibility-matrix.md) | [v0.2 release readiness](doc/v0.2-release-readiness.md) | [Athena Agent Architecture v2](doc/architecture-v2.md) | [Research Agent v3](doc/research-agent-v3.md) | [Research Agent v2](doc/research-agent-v2.md) | [Personal AI Operating System Specification v1.0](doc/personal-ai-os-spec-v1.md)
 
 Browser usage: [Common Browser Commands](https://github.com/good-fish-man/athena-launcher/blob/main/docs/browser-command-guide.md)
 
@@ -24,6 +26,7 @@ The Runtime emits typed research progress, query, evidence, confidence, and fina
 - OpenAI-compatible model routing, including local Ollama models.
 - Built-in file, shell, web, planning, task, and image-generation tools.
 - Relevance-based tool and skill selection instead of sending every capability to the model.
+- Fail-closed loading of human-approved, immutable Runtime Artifacts pinned by the current RunManifest; artifacts can organize but never grant capabilities.
 - Skills, knowledge retrieval, uploaded-file context, and sub-agent orchestration.
 - Project workspace tools for reading, searching, editing, and writing code.
 - Optional PostgreSQL-backed long-term memory and background memory review.
@@ -59,7 +62,7 @@ Request flow:
 
 1. The transport layer accepts a request and propagates `X-Trace-Id` into gRPC metadata and context.
 2. The server resolves model configuration and optional memory context.
-3. The dispatcher selects relevant tools and up to the most relevant skills for the current request.
+3. The dispatcher validates the reserved Runtime Artifact Bundle, consumes it before generic prompt rendering, and selects only reviewed plans whose required capabilities are already available.
 4. For news, travel, comparison, or explicit research requests, the Research Agent plans source-aware queries, searches and fetches within a runtime budget, ranks and verifies evidence, and performs follow-up rounds while material gaps remain.
 5. The Eino runner executes the model/tool loop and coordinates sub-agents when configured.
 6. Results are returned as a completion or typed stream events such as `meta`, `delta`, `tool_call`, `error`, and `done`.

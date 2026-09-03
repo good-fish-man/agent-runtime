@@ -43,7 +43,7 @@ func Begin(ctx context.Context, kind, name, id string, fields ...any) *Invocatio
 		startedAt: startedAt,
 		base:      append([]any{"source", callerSource(1)}, fields...),
 	}
-	log.InfowCtx(ctx, kind+" call started", invocation.fields(startedAt, false, 0)...)
+	log.Infow(ctx, kind+" call started", invocation.fields(startedAt, false, 0)...)
 	return invocation
 }
 
@@ -70,10 +70,10 @@ func (i *Invocation) End(err error, fields ...any) {
 		values := i.fields(finishedAt, true, finishedAt.Sub(i.startedAt), fields...)
 		if err != nil {
 			values = append(values, "error_chain", log.FormatError(err))
-			log.ErrorwCtx(i.ctx, i.kind+" call failed", values...)
+			log.Errorw(i.ctx, i.kind+" call failed", values...)
 			return
 		}
-		log.InfowCtx(i.ctx, i.kind+" call completed", values...)
+		log.Infow(i.ctx, i.kind+" call completed", values...)
 	})
 }
 

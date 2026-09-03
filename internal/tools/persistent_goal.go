@@ -14,7 +14,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"github.com/good-fish-man/agent-runtime/internal/constant"
-	orchestrationv1 "github.com/good-fish-man/athena-protocol/protocol/orchestration/v1"
+	orchestrationv2 "github.com/good-fish-man/athena-protocol/protocol/orchestration/v2"
 )
 
 const PersistentGoalCreateToolName = "PersistentGoalCreate"
@@ -164,8 +164,8 @@ func validatePersistentGoalInput(request PersistentGoalCreateInput) error {
 			return fmt.Errorf("persistent goal success criteria cannot be empty")
 		}
 	}
-	if len(request.Tasks) == 0 || len(request.Tasks) > orchestrationv1.MaxGraphNodes {
-		return fmt.Errorf("persistent goal requires 1..%d tasks", orchestrationv1.MaxGraphNodes)
+	if len(request.Tasks) == 0 || len(request.Tasks) > orchestrationv2.MaxGraphNodes {
+		return fmt.Errorf("persistent goal requires 1..%d tasks", orchestrationv2.MaxGraphNodes)
 	}
 	if request.Deadline != "" {
 		if _, err := time.Parse(time.RFC3339, request.Deadline); err != nil {
@@ -175,11 +175,11 @@ func validatePersistentGoalInput(request PersistentGoalCreateInput) error {
 	seen := make(map[string]struct{}, len(request.Tasks))
 	for _, item := range request.Tasks {
 		id := strings.TrimSpace(item.TaskID)
-		if id == "" || strings.TrimSpace(item.Objective) == "" || item.Depth < 1 || item.Depth > orchestrationv1.MaxGraphDepth {
-			return fmt.Errorf("every specialist task requires an id, objective, and depth from 1 to %d", orchestrationv1.MaxGraphDepth)
+		if id == "" || strings.TrimSpace(item.Objective) == "" || item.Depth < 1 || item.Depth > orchestrationv2.MaxGraphDepth {
+			return fmt.Errorf("every specialist task requires an id, objective, and depth from 1 to %d", orchestrationv2.MaxGraphDepth)
 		}
 		switch item.Specialist {
-		case orchestrationv1.SpecialistResearch, orchestrationv1.SpecialistBrowser, orchestrationv1.SpecialistDesktop, orchestrationv1.SpecialistFile, orchestrationv1.SpecialistSynthesis:
+		case orchestrationv2.SpecialistResearch, orchestrationv2.SpecialistBrowser, orchestrationv2.SpecialistDesktop, orchestrationv2.SpecialistFile, orchestrationv2.SpecialistSynthesis:
 		default:
 			return fmt.Errorf("task %s uses an unsupported specialist %q", id, item.Specialist)
 		}

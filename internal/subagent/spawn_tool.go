@@ -86,7 +86,7 @@ func (t *SpawnTool) InvokableRun(ctx context.Context, argumentsInJSON string, op
 		return "", fmt.Errorf("parse spawn input failed: %w", err)
 	}
 
-	log.Infof("[SpawnTool] Spawning task for agent: %s", input.AgentID)
+	log.Infof(ctx, "[SpawnTool] Spawning task for agent: %s", input.AgentID)
 
 	// 启动异步任务
 	taskInfo, err := t.manager.Spawn(ctx, input.AgentID, input.Task)
@@ -107,7 +107,7 @@ func (t *SpawnTool) InvokableRun(ctx context.Context, argumentsInJSON string, op
 		return "", fmt.Errorf("marshal response failed: %w", err)
 	}
 
-	log.Infof("[SpawnTool] Task %s spawned successfully", taskInfo.TaskID)
+	log.Infof(ctx, "[SpawnTool] Task %s spawned successfully", taskInfo.TaskID)
 
 	return string(resultJSON), nil
 }
@@ -159,7 +159,7 @@ func (t *CollectTaskTool) InvokableRun(ctx context.Context, argumentsInJSON stri
 		return "", fmt.Errorf("parse collect_task input failed: %w", err)
 	}
 
-	log.Infof("[CollectTaskTool] Collecting task: %s", input.TaskID)
+	log.Infof(ctx, "[CollectTaskTool] Collecting task: %s", input.TaskID)
 
 	// 如果没有指定 timeout，使用默认值
 	timeout := constant.DefaultSubAgentWaitTimeoutSec
@@ -210,7 +210,7 @@ func (t *CollectTaskTool) InvokableRun(ctx context.Context, argumentsInJSON stri
 		return "", fmt.Errorf("marshal response failed: %w", err)
 	}
 
-	log.Infof("[CollectTaskTool] Task %s collected, status: %s", input.TaskID, taskInfo.Status)
+	log.Infof(ctx, "[CollectTaskTool] Task %s collected, status: %s", input.TaskID, taskInfo.Status)
 
 	return string(resultJSON), nil
 }
@@ -327,7 +327,7 @@ func (t *CancelTaskTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 		return "", fmt.Errorf("parse cancel_task input failed: %w", err)
 	}
 
-	log.Infof("[CancelTaskTool] Cancelling task: %s", input.TaskID)
+	log.Infof(ctx, "[CancelTaskTool] Cancelling task: %s", input.TaskID)
 
 	if err := t.manager.CancelTask(input.TaskID); err != nil {
 		return "", fmt.Errorf("cancel task failed: %w", err)
@@ -419,7 +419,7 @@ func (t *ParallelSpawnTool) InvokableRun(ctx context.Context, argumentsInJSON st
 		return "", fmt.Errorf("tasks cannot be empty")
 	}
 
-	log.Infof("[ParallelSpawnTool] Starting parallel spawn for %d tasks", len(input.Tasks))
+	log.Infof(ctx, "[ParallelSpawnTool] Starting parallel spawn for %d tasks", len(input.Tasks))
 
 	// 配置池
 	maxConcurrent := input.MaxConcurrent
@@ -435,7 +435,7 @@ func (t *ParallelSpawnTool) InvokableRun(ctx context.Context, argumentsInJSON st
 		poolTimeout = constant.DefaultPoolTimeoutSec * time.Second
 	}
 
-	pool := NewAgentPool(t.manager, PoolConfig{
+	pool := NewAgentPool(ctx, t.manager, PoolConfig{
 		MaxConcurrent: maxConcurrent,
 		Timeout:       timeout,
 		PoolTimeout:   poolTimeout,
@@ -473,7 +473,7 @@ func (t *ParallelSpawnTool) InvokableRun(ctx context.Context, argumentsInJSON st
 		return "", fmt.Errorf("marshal response failed: %w", err)
 	}
 
-	log.Infof("[ParallelSpawnTool] Parallel spawn completed: %d/%d succeeded",
+	log.Infof(ctx, "[ParallelSpawnTool] Parallel spawn completed: %d/%d succeeded",
 		response["completed"].(int), response["total_tasks"].(int))
 
 	return string(resultJSON), nil

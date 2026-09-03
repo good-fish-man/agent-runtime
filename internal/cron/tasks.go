@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -117,7 +118,7 @@ func GetCronFilePath(dir string) string {
 }
 
 // ReadCronTasks reads tasks from the persistent file
-func ReadCronTasks(dir string) ([]*CronTask, error) {
+func ReadCronTasks(ctx context.Context, dir string) ([]*CronTask, error) {
 	filePath := GetCronFilePath(dir)
 
 	data, err := os.ReadFile(filePath)
@@ -130,7 +131,7 @@ func ReadCronTasks(dir string) ([]*CronTask, error) {
 
 	var file CronFile
 	if err := json.Unmarshal(data, &file); err != nil {
-		log.Warnf("[CronTasks] Failed to parse cron file: %v", err)
+		log.Warnf(ctx, "[CronTasks] Failed to parse cron file: %v", err)
 		return []*CronTask{}, nil
 	}
 
@@ -138,11 +139,11 @@ func ReadCronTasks(dir string) ([]*CronTask, error) {
 	validTasks := make([]*CronTask, 0, len(file.Tasks))
 	for _, t := range file.Tasks {
 		if t.ID == "" || t.Cron == "" || t.Prompt == "" {
-			log.Warnf("[CronTasks] Skipping malformed task: %+v", t)
+			log.Warnf(ctx, "[CronTasks] Skipping malformed task: %+v", t)
 			continue
 		}
 		if ParseCronExpression(t.Cron) == nil {
-			log.Warnf("[CronTasks] Skipping task %s with invalid cron: %s", t.ID, t.Cron)
+			log.Warnf(ctx, "[CronTasks] Skipping task %s with invalid cron: %s", t.ID, t.Cron)
 			continue
 		}
 		validTasks = append(validTasks, &t)
@@ -182,13 +183,13 @@ func WriteCronTasks(tasks []*CronTask, dir string) error {
 // ========== Combined Task Operations ==========
 
 // ListAllTasks returns all tasks (both file-based and session)
-func ListAllTasks(dir string) []*CronTask {
+func ListAllTasks(ctx context.Context, dir string) []*CronTask {
 	var allTasks []*CronTask
 
 	// Get durable (file-based) tasks
-	durableTasks, err := ReadCronTasks(dir)
+	durableTasks, err := ReadCronTasks(ctx, dir)
 	if err != nil {
-		log.Warnf("[CronTasks] Failed to read durable tasks: %v", err)
+		log.Warnf(ctx, "[CronTasks] Failed to read durable tasks: %v", err)
 	} else {
 		for _, t := range durableTasks {
 			t.Durable = true // Mark as durable
@@ -207,7 +208,7 @@ func ListAllTasks(dir string) []*CronTask {
 }
 
 // AddTask adds a new task
-func AddTask(cron, prompt string, recurring, durable bool, agentID string) (*CronTask, error) {
+func AddTask(ctx context.Context, cron, prompt string, recurring, durable bool, agentID string) (*CronTask, error) {
 	id, err := GenerateTaskID()
 	if err != nil {
 		return nil, fmt.Errorf("generate task ID failed: %w", err)
@@ -234,7 +235,7 @@ func AddTask(cron, prompt string, recurring, durable bool, agentID string) (*Cro
 	}
 
 	// Durable task - save to file
-	tasks, err := ReadCronTasks("")
+	tasks, err := ReadCronTasks(ctx, "")
 	if err != nil {
 		return nil, fmt.Errorf("read existing tasks failed: %w", err)
 	}
@@ -252,7 +253,7 @@ func AddTask(cron, prompt string, recurring, durable bool, agentID string) (*Cro
 }
 
 // RemoveTasks removes tasks by IDs
-func RemoveTasks(ids []string, dir string) error {
+func RemoveTasks(ctx context.Context, ids []string, dir string) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -266,7 +267,7 @@ func RemoveTasks(ids []string, dir string) error {
 	RemoveSessionTasks(ids)
 
 	// Remove from file store
-	tasks, err := ReadCronTasks(dir)
+	tasks, err := ReadCronTasks(ctx, dir)
 	if err != nil {
 		return fmt.Errorf("read tasks failed: %w", err)
 	}
@@ -288,7 +289,7 @@ func RemoveTasks(ids []string, dir string) error {
 }
 
 // MarkTasksFired updates the LastFiredAt timestamp for tasks
-func MarkTasksFired(ids []string, firedAt int64, dir string) error {
+func MarkTasksFired(ctx context.Context, ids []string, firedAt int64, dir string) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -298,7 +299,7 @@ func MarkTasksFired(ids []string, firedAt int64, dir string) error {
 		idSet[id] = true
 	}
 
-	tasks, err := ReadCronTasks(dir)
+	tasks, err := ReadCronTasks(ctx, dir)
 	if err != nil {
 		return fmt.Errorf("read tasks failed: %w", err)
 	}
@@ -321,8 +322,8 @@ func MarkTasksFired(ids []string, firedAt int64, dir string) error {
 }
 
 // HasTasks checks if there are any persistent tasks
-func HasTasks(dir string) bool {
-	tasks, err := ReadCronTasks(dir)
+func HasTasks(ctx context.Context, dir string) bool {
+	tasks, err := ReadCronTasks(ctx, dir)
 	if err != nil {
 		return false
 	}
@@ -352,8 +353,8 @@ func FindExpiredTasks(tasks []*CronTask) []*CronTask {
 }
 
 // CleanupExpiredTasks removes expired tasks
-func CleanupExpiredTasks(dir string) error {
-	tasks, err := ReadCronTasks(dir)
+func CleanupExpiredTasks(ctx context.Context, dir string) error {
+	tasks, err := ReadCronTasks(ctx, dir)
 	if err != nil {
 		return err
 	}
@@ -371,7 +372,7 @@ func CleanupExpiredTasks(dir string) error {
 			continue
 		}
 		if now-t.CreatedAt > maxAgeMs {
-			log.Infof("[CronTasks] Auto-expired task %s (age exceeded %d days)", t.ID, DefaultMaxAgeDays)
+			log.Infof(ctx, "[CronTasks] Auto-expired task %s (age exceeded %d days)", t.ID, DefaultMaxAgeDays)
 			continue
 		}
 		remaining = append(remaining, t)

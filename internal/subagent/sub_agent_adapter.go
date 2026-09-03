@@ -45,7 +45,7 @@ func (s *SubAgentAdapter) Description(ctx context.Context) string {
 func (s *SubAgentAdapter) Run(ctx context.Context, input *adk.AgentInput, options ...adk.AgentRunOption) *adk.AsyncIterator[*adk.AgentEvent] {
 	iter, gen := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
 
-	log.Go(func() {
+	log.Go(ctx, func(childCtx context.Context) {
 		defer gen.Close()
 
 		// Convert AgentInput.Messages to schema.Messages
@@ -62,7 +62,7 @@ func (s *SubAgentAdapter) Run(ctx context.Context, input *adk.AgentInput, option
 		}
 
 		// Run the inner agent
-		innerEvents := s.agent.Run(ctx, &adk.AgentInput{
+		innerEvents := s.agent.Run(childCtx, &adk.AgentInput{
 			Messages:        messages,
 			EnableStreaming: input.EnableStreaming,
 		}, options...)

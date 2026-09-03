@@ -33,14 +33,14 @@ func executeTextToolMarkup(ctx context.Context, content string, available []tool
 		return content, false, nil
 	}
 	if err != nil {
-		log.WarnfCtx(ctx, "[ToolMarkup] ignored malformed text tool call: %v", err)
+		log.Warnf(ctx, "[ToolMarkup] ignored malformed text tool call: %v", err)
 		return "图片生成请求格式无效，请重试。", true, nil
 	}
 	if !supportedTextToolCall(call.Name) {
-		log.WarnfCtx(ctx, "[ToolMarkup] blocked unsupported text tool call: %s", call.Name)
+		log.Warnf(ctx, "[ToolMarkup] blocked unsupported text tool call: %s", call.Name)
 		return "模型返回了不受支持的工具调用，请重试。", true, nil
 	}
-	log.WarnfCtx(ctx, "[ToolMarkup] converting model text output to native tool call: %s", call.Name)
+	log.Warnf(ctx, "[ToolMarkup] converting model text output to native tool call: %s", call.Name)
 
 	for _, candidate := range available {
 		if candidate == nil {
@@ -61,7 +61,7 @@ func executeTextToolMarkup(ctx context.Context, content string, available []tool
 		return result, true, nil
 	}
 
-	log.WarnfCtx(ctx, "[ToolMarkup] requested tool is unavailable: %s", call.Name)
+	log.Warnf(ctx, "[ToolMarkup] requested tool is unavailable: %s", call.Name)
 	if call.Name == tools.GenerateVideoToolName {
 		return "当前 Agent 未绑定视频生成模型，请先在 Agent 设置中选择视频模型。", true, nil
 	}

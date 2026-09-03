@@ -20,11 +20,11 @@ func TestUnit_UnaryTraceInterceptor_UsesIncomingMetadata(t *testing.T) {
 
 	interceptor := UnaryTraceInterceptor()
 	_, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{FullMethod: "/test.Service/Run"}, func(ctx context.Context, req any) (any, error) {
-		if got, _ := ctx.Value(log.ReqIDKey).(string); got != want {
+		if got := log.ReqID(ctx); got != want {
 			t.Fatalf("ctx trace id = %q, want %q", got, want)
 		}
-		if got := log.GetReqId(); got != want {
-			t.Fatalf("bound logger trace id = %q, want %q", got, want)
+		if got := log.ReqID(ctx); got != want {
+			t.Fatalf("logger context trace id = %q, want %q", got, want)
 		}
 		return nil, nil
 	})
@@ -37,7 +37,7 @@ func TestUnit_UnaryTraceInterceptor_UsesRequestTraceAndRecoversPanic(t *testing.
 	const want = "trace-from-request"
 	interceptor := UnaryTraceInterceptor()
 	_, err := interceptor(context.Background(), tracedRequest{traceID: want}, &grpc.UnaryServerInfo{FullMethod: "/test.Service/Run"}, func(ctx context.Context, req any) (any, error) {
-		if got, _ := ctx.Value(log.ReqIDKey).(string); got != want {
+		if got := log.ReqID(ctx); got != want {
 			t.Fatalf("ctx trace id = %q, want %q", got, want)
 		}
 		panic("broken handler")
@@ -53,11 +53,11 @@ func TestUnit_StreamTraceInterceptor_UsesIncomingMetadata(t *testing.T) {
 
 	interceptor := StreamTraceInterceptor()
 	err := interceptor(nil, fakeServerStream{ctx: ctx}, &grpc.StreamServerInfo{FullMethod: "/test.Service/RunStream"}, func(srv any, stream grpc.ServerStream) error {
-		if got, _ := stream.Context().Value(log.ReqIDKey).(string); got != want {
+		if got := log.ReqID(stream.Context()); got != want {
 			t.Fatalf("stream ctx trace id = %q, want %q", got, want)
 		}
-		if got := log.GetReqId(); got != want {
-			t.Fatalf("bound logger trace id = %q, want %q", got, want)
+		if got := log.ReqID(stream.Context()); got != want {
+			t.Fatalf("logger context trace id = %q, want %q", got, want)
 		}
 		return nil
 	})

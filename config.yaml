@@ -12,7 +12,7 @@ db:
   enabled: true
   db_type: "postgres"
   username: "postgres"
-  password: "a123456"
+  password: "a123456" # set ATHENA_DB_PASSWORD or let Athena Launcher generate it
   db_host: "localhost"
   db_port: 5432
   db_name: "agent_runtime"
@@ -24,6 +24,17 @@ memory:
   inject_into_prompt: true
   background_review: true
   max_review_memory: 10
+
+# Model-assisted intent classification. Modes: rules, shadow, hybrid.
+# Requests may provide models["intent"] to use a smaller dedicated model;
+# otherwise the default chat model is reused.
+intent:
+  mode: "hybrid"
+  timeout_ms: 4000
+  min_confidence: 0.75
+  max_history: 4
+  # Locale-specific deterministic rules. Empty disables external language packs.
+  language_packs_dir: "config/intent-languages"
 
 research:
   enabled: true

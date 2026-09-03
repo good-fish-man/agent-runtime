@@ -4,12 +4,15 @@
 
 | Field | Value |
 | --- | --- |
-| Document version | `1.0-draft` |
-| Current code baseline | `v0.1.5` |
+| Document version | `1.1-rebased` |
+| Current code baseline | `v0.1.7` maintenance line plus the `architecture/agent-os-roadmap-v1.0` architecture-integration branch |
 | Planned releases | `v0.2.0` through `v1.0.0` |
 | Repositories | `agent-runtime`, `agent-runtime-client`, `athena-launcher`, `frontend/agent-ui`, `logx`, and the planned `athena-protocol` |
 | Primary objective | Evolve Athena from an LLM plus tools into a durable, verifiable, learning, and governable Personal Agent OS |
 | Document role | Normative cross-repository roadmap. Release implementation plans must follow the ownership boundaries and gates defined here. |
+| Current route status | `v0.2` internal implementation, the local seven-scenario packaged run, and locally executable gates are substantially closed; signed installation, the 500-journey packaged soak, the complete ten-span trace, and production-coverage gates remain open; `v0.3` W1-W5 have engineering evidence but the release is incomplete |
+| Architecture semantics | `v0.3` Core Invariants and four-layer ownership are **FROZEN** |
+| Contract maturity | Object schemas are `draft/v0alpha`; storage and new wire contracts are not frozen |
 
 ---
 
@@ -17,16 +20,30 @@
 
 Athena already contains foundations such as Intent, RoutePlan, Capability Registry, Research, device WebSocket control, Browser Runtime, Perception, and frontend execution panels. These capabilities are distributed across repositories, however, and still suffer from duplicated protocols, unclear state ownership, and incomplete execution feedback loops.
 
-Athena must therefore not jump directly into self-evolution. The required sequence is:
+Athena must therefore not jump directly into self-evolution. The rebased dependency sequence is:
 
 ```text
-v0.1.5 current baseline
+Current state
+    |-- v0.2 internal implementation and local tests complete
+    `-- v0.3 Browser Semantic Slice has validation evidence
     |
     v
-v0.2 unified execution kernel
+V3-W0: close the v0.2 external release gates
     |
     v
-v0.3 experience and evaluation foundation
+V3-W1: semantic baseline and browser golden path
+    |
+    v
+V3-W2: browser failure matrix
+    |
+    v
+V3-W3: experience, privacy, and retention
+    |
+    v
+V3-W4: evaluation, replay, and retrieval
+    |
+    v
+V3-W5: evidence review and release gate
     |
     v
 v0.4 skill and strategy candidate learning
@@ -95,6 +112,43 @@ This plan makes the following architectural decisions:
 3. Do not rewrite the execution kernel and introduce learning in the same release.
 4. Every new feature must use the unified protocol. Do not add special JSON, tool markup, or frontend forwarding paths.
 5. A release must pass its exit gate before work begins on the next architectural layer.
+
+### 2.4 Authority boundaries and anti-drift rules
+
+Athena no longer uses one document to freeze architecture, fields, and release status at the same time. Four decision classes are controlled by different evidence:
+
+| Decision layer | Authority | Current state | Change mechanism |
+| --- | --- | --- | --- |
+| Architecture semantics | The 12 Core Invariants, four-layer ownership, and World State Authority in the `v0.3 Architecture Plan` | **FROZEN** | Architecture ADR and renewed review only |
+| Release scope and gates | This roadmap | Normative `v0.2-v1.0` delivery spine | Version-boundary changes update both language editions and dependency gates |
+| Internal objects and implementation | `draft/v0alpha`, internal fixtures, and reversible migrations | Draft | May change from real-slice evidence without compatibility promises |
+| Stable wire and storage contracts | Released protocols, schema hashes, and formal migration contracts | New objects are not frozen | Compatibility, cross-language fixtures, upgrade/rollback evidence, and ADR review required |
+
+There is no implicit "newest document wins" rule. Architecture documents define **what the semantics mean**, this roadmap defines **which release delivers them**, and released protocols define **production compatibility**. An unclassified conflict stops work until an ADR resolves it.
+
+The following rules constrain every later release:
+
+1. Passing the Browser Vertical Slice does not complete the `v0.3` release.
+2. Until the `v0.2` external gates close, `v0.3` prototype evidence may remain, but `v0.3` cannot ship and `v0.4` Candidate Learning cannot begin.
+3. Every new concept maps to a Core Invariant, current-release objective, owning repository, and executable test. Otherwise it stays in the backlog.
+4. One Browser Slice cannot freeze database tables, public RPCs, or event fields.
+5. `v0.3` records, retrieves, and evaluates offline only. Automatic Candidate generation, Promotion, Canary, or production behavior changes are version violations.
+6. Every release maintains explicit Done, Next, Non-goal, and Exit-evidence columns. A code merge is not gate evidence.
+7. A release consumes only artifacts that passed the previous release gate, never planned but unverified objects.
+
+### 2.5 Version dependency spine
+
+| Release | Consumes only these verified artifacts | One new layer introduced | Must not be pulled forward |
+| --- | --- | --- | --- |
+| `v0.2` | Existing users, agents, models, and device capabilities | Unified Task/Action/Observation, World, and device execution kernel | Experience Mining, Candidate, Promotion |
+| `v0.3` | Verified execution kernel and real Observations | Effect Verification, Experience, Evaluation, and Retrieval | Automatic Skills, online Canary, Ontology self-learning |
+| `v0.4` | Sanitized Experience and stable offline suites | Declarative Skill/Strategy Candidates and human review | Automatic activation, production experiments, code execution |
+| `v0.5` | Reviewed Candidates and repeatable benchmarks | AgentBuild, RunManifest, Shadow, low-risk Canary, and Rollback | Automatic R2/R3 Canary and kernel self-modification |
+| `v0.6` | Traceable Experience, Evaluation, and Builds | Evidence Knowledge, conflict, freshness, and controlled Ontology | Evidence-free promotion and Ontology self-learning |
+| `v0.7` | Stable Task, World, Knowledge, and Build layers | Persistent Goals, multi-agent work, checkpoints, and cross-device recovery | Unbudgeted autonomy and policy-bypassing delegation |
+| `v0.8` | Frozen Capability contracts and stable governance kernel | SDK, signed Plugins, Sandbox, and Registry | Unsigned executors and Plugin changes to Kernel/Auth |
+| `v0.9` | Functionally frozen complete system | Security, backup, update, signing, HA, load tests, and SLOs | New major architecture concepts |
+| `v1.0` | Production-gated `v0.9` | Protocol freeze, core user journeys, and GA support commitment | Breaking changes outside a new-version process |
 
 ---
 
@@ -559,6 +613,8 @@ rc.1     Upgrade rehearsal and release manifest
 
 ## 8. v0.3.0: Experience and Evaluation Foundation
 
+> See the [Athena Agent OS v0.3 Architecture Plan](./agent-os-architecture-plan-v0.3.md) for the effect-centric semantic baseline, conceptual objects, and browser validation slice. This section remains authoritative for release scope and gates.
+
 ### 8.1 Objective
 
 Allow Athena to answer safely:
@@ -572,13 +628,32 @@ Is a new implementation better than the old one?
 
 This release reaches only `E1-E2`: recording and retrieval. It does not modify production behavior automatically.
 
+It also validates the frozen architecture semantics through a browser vertical slice. Conceptual objects remain `draft/v0alpha`; storage and a new wire protocol are not frozen at the start of this release.
+
 ### 8.2 Entry criteria
 
 - Every `v0.2` exit gate has passed.
 - Task, Action, Observation, and World Revision contracts are stable.
 - The data-redaction specification has passed security review.
 
-### 8.3 Experience definition
+### 8.3 Release workstreams and current status
+
+These workstreams define the internal `v0.3` delivery order; they are not new public version numbers. `v0.3.0` is complete only after every gate passes:
+
+| Workstream | Purpose and deliverables | Current status | Exit evidence |
+| --- | --- | --- | --- |
+| `V3-W0` prerequisite reconciliation | Complete the `v0.2` database rollback, three-platform packages, seven E2E scenarios, 500-run soak, span audit, and credential audit | **PARTIAL / BLOCKING**: database rollback, unsigned cross-platform structure, Browser 10/10, component 500/500, the local packaged seven-journey run, and release-corpus credential scan pass; signed platform installs, the complete packaged 500-run soak, one complete ten-span Trace, and 95% production coverage remain external | The [final evidence aggregation](./v0.3-evidence-review.md) remains `release_ready=false` until every remaining gate in `v0.2-release-readiness` has an auditable record |
+| `V3-W1` semantic baseline and golden path | Freeze Core Invariants; implement `draft/v0alpha`; correlate Outcome through Experience; really play the second video | **Engineering implementation complete** | Strict validation, full regression, real media playback, and same-session E2E pass |
+| `V3-W2` browser failure matrix | Snapshot drift, target removal, login-required, unknown, forbidden effects, cancellation, and retry boundaries | **Engineering implementation complete** | Every scenario has Observation, Verification, terminal state, Trace, and Replay Fixture evidence |
+| `V3-W3` experience and privacy | Internal draft persistence, async generation, redaction, retention/deletion, owner isolation, and user controls | **Engineering implementation complete; production coverage awaits V3-W0 sampling** | 95% terminal coverage, zero secret leakage, deletion, and cross-user isolation tests pass |
+| `V3-W4` evaluation, replay, and retrieval | Fixtures, suites, runs, baseline comparison, retrieval budgets, and poisoning defenses | **Engineering implementation complete** | Replay is repeatable; historical retrieval never overrides current Observation; offline metrics are comparable |
+| `V3-W5` evidence review and release | Measure used fields, remove unjustified fields, and decide between internal metadata and a new protocol ADR | **Engineering review complete; release blocked by V3-W0** | [Evidence review](./v0.3-evidence-review.md) and [ADR-0001](./adr/0001-v0.3-semantics-carriage.md); no new protocol is frozen |
+
+The `V3-W1 -> V3-W5` engineering implementation and evidence may be retained and corrected, but the remaining `V3-W0` external gates still prevent a `v0.3` release and entry into `v0.4`. `os_experience*` tables remain reversible internal implementation details; their fields, table names, and public APIs are not frozen contracts.
+
+Completing `V3-W1` proves that the object boundaries support one real task. It does not prove that the Experience product, privacy lifecycle, evaluation system, or the complete `v0.3` release is ready. `V3-W*` identifies version-delivery workstreams; `R0-R3` remains reserved for behavior risk levels.
+
+### 8.4 Experience definition
 
 Experience is not a complete chat transcript or raw reasoning trace. It is a sanitized, structured summary of task execution:
 
@@ -606,7 +681,7 @@ Experience
 `-- provenance
 ```
 
-### 8.4 Privacy and retention
+### 8.5 Privacy and retention
 
 - Redaction runs before Experience is written, not afterward.
 - Plaintext credentials, cookies, tokens, password fields, identity documents, and payment data are never retained.
@@ -616,7 +691,15 @@ Experience
 - Deletion uses payload removal or key destruction plus a tombstone without breaking audit consistency.
 - Experiences from different users or organizations cannot be retrieved together. Public data requires explicit publication.
 
-### 8.5 Delivery scope
+### 8.6 Delivery scope
+
+#### Browser semantic baseline validation
+
+- Use "play the second video on the current page" to validate complete correlation across OutcomeSpec, TargetSpec, TargetResolution, PlanCandidate, PlanRun, ActionAttempt, Observation, VerificationResult, and ExperienceRecord.
+- Bind target resolution to a page snapshot, evidence, and a precise read set. Re-ground after page change and never reuse stale ordinals, coordinates, or CDP targets.
+- Action success does not imply Outcome success. Clause-level effect verification must prove media playback.
+- Let `unknown` request budgeted observation, `unsatisfied` enter bounded retry, compensation, or replanning, and `conflicting` enter evidence reconciliation or human intervention.
+- Continue using Protocol v4 Action/Observation. Validate conceptual fields through internal fixtures and event correlation first.
 
 #### Experience Engine
 
@@ -661,7 +744,7 @@ Rules take precedence; an LLM may supplement classification. Every classificatio
 - Apply result-count, token, time, and sensitivity budgets before retrieval reaches the Planner.
 - Label retrieved content as historical reference and never let it override current Observation.
 
-### 8.6 Data model
+### 8.7 Data model
 
 ```text
 os_experience
@@ -675,14 +758,14 @@ os_evaluation_run
 os_evaluation_result
 ```
 
-### 8.7 Frontend delivery
+### 8.8 Frontend delivery
 
 - Let users inspect how a Task formed an Experience.
 - Let users disable learning, delete personal Experiences, and configure retention.
 - Let administrators inspect failure classes, model/Capability cost, and evaluation results.
 - Never expose raw chain of thought; show explainable decision summaries and evidence.
 
-### 8.8 Test plan
+### 8.9 Test plan
 
 - Secret and PII redaction corpus.
 - Cross-user isolation tests.
@@ -691,8 +774,11 @@ os_evaluation_result
 - Fixture repeatability tests.
 - Mock browser/device replay tests.
 - Retrieval poisoning and prompt-injection tests.
+- Browser golden-path, snapshot-drift, login-required, forbidden-effect, unknown, and cancellation tests.
+- Outcome-to-Experience correlation completeness tests.
+- Precise target read-set invalidation and four-state effect-clause verification tests.
 
-### 8.9 Exit gate
+### 8.10 Exit gate
 
 - At least 95% of terminal Tasks produce structured Experience; every skipped Task records a reason.
 - Secret-corpus leakage is zero.
@@ -700,13 +786,19 @@ os_evaluation_result
 - Repeated runs of the same Fixture are deterministic.
 - Historical retrieval never overwrites current World State.
 - No Candidate changes production planning.
+- The browser golden path produces a complete Outcome-to-Experience trace and proves actual media playback rather than only a successful click.
+- Page refresh, target removal, or tab closure never executes a stale TargetResolution.
+- A forbidden-effect violation overrides ordinary desired-effect success.
+- Existing Protocol v4 contract tests remain green.
 
-### 8.10 Explicit non-goals
+### 8.11 Explicit non-goals
 
 - Automatic Skill creation or activation.
 - Online canary.
 - Dynamic Planner prompt modification.
 - Ontology self-learning.
+- Freezing new object fields, database tables, or wire protocol.
+- General robot physics and production exploratory-affordance execution.
 
 ---
 
@@ -1536,13 +1628,15 @@ Do not concatenate every layer with an ambiguous colon. A logging boundary emits
 
 ## 20. Branches, Tags, and Cross-Repository Releases
 
-### 20.1 v0.2 development
+### 20.1 Current architecture-integration phase
 
-- Keep `main` as the stable `v0.1.x` line.
-- Use `architecture/agent-os-v0.2` for the breaking architectural migration.
+- Keep `main` as the stable `v0.1.7` maintenance line.
+- `architecture/agent-os-roadmap-v1.0` is the only long-lived architecture-integration branch. It carries the synchronized `v0.1.7` fixes, the internal `v0.2` implementation, and `v0.3` validation work.
+- Sync critical `main` fixes into the architecture branch only after review. Do not create parallel long-lived `agent-os-v0.2` or `agent-os-v0.3` branches.
+- Do not mark the internal implementation as a formal `v0.2` release before `V3-W0` closes, and do not tag `v0.3.0` before `V3-W5` closes.
 - Tag Protocol first, then upgrade Runtime, Control Plane, Launcher, and Frontend according to the compatibility matrix.
 
-### 20.2 After v0.2
+### 20.2 After the v0.3 release
 
 - Return to trunk-based development.
 - Use short-lived feature branches and pull requests.
@@ -1601,27 +1695,28 @@ Every release delivers:
 
 ## 23. Recommended Immediate Sequence
 
-Start only this work now:
+Only the following queue may run now:
 
 ```text
-1. Approve this roadmap and the v0.2 ADRs.
-2. Create the athena-protocol repository.
-3. Freeze the Action/Observation v4 schemas.
-4. Build the Task Controller in the Control Plane.
-5. Migrate existing agent_control_* data.
-6. Make the Runtime emit only Decisions and Action Proposals.
-7. Make the Launcher execute Actions and return Observations only.
-8. Make the Frontend consume one unified Task Event stream.
-9. Complete v0.2 fault injection and cross-platform acceptance.
-10. Begin Experience Schema work only after v0.2 passes its gate.
+1. V3-W0: collect the remaining v0.2 external-gate evidence without redesigning the completed internal backbone.
+2. Retain the V3-W1 golden path and draft/v0alpha evidence; do not reopen architecture semantics unless failing evidence requires an ADR.
+3. V3-W2: complete the browser failure matrix, terminal states, traces, and replay fixtures.
+4. V3-W3: only after V3-W0/V3-W2 pass, complete the experience privacy and data lifecycle.
+5. V3-W4: complete deterministic replay, offline evaluation, historical retrieval, and poisoning defenses.
+6. V3-W5: review real field usage, remove unsupported fields, and decide whether a protocol ADR is justified.
+7. Release v0.3.0 after V3-W5 passes; only then may v0.4 candidate learning begin.
 ```
 
-Do not begin these tracks concurrently:
+Stop rule: when a workstream fails, fix that workstream or its dependencies instead of bypassing it with another abstraction. Merged code, an existing table, one passing E2E test, or a successful demo never substitutes for a release gate.
+
+The following remain prohibited before `V3-W5`:
 
 ```text
+Freezing a new object schema, storage model, or wire contract
 Ontology Learning
-Automatic Skill Promotion
+Skill or Strategy Candidate Promotion
 Generated Capability Code
+Online Canary
 Public Plugin Marketplace
 Physical Agent Runtime
 ```

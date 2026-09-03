@@ -81,7 +81,7 @@ func GetScheduler() *Scheduler {
 		defer defaultSchedulerMu.Unlock()
 		if defaultScheduler == nil {
 			defaultScheduler = NewScheduler(".")
-			log.Infof("[CronScheduler] Created default scheduler")
+			log.Infof(defaultScheduler.ctx, "[CronScheduler] Created default scheduler")
 		}
 	})
 	return defaultScheduler
@@ -111,15 +111,15 @@ func (s *Scheduler) Start() {
 	defer s.mu.Unlock()
 
 	if s.running {
-		log.Warnf("[CronScheduler] Already running")
+		log.Warnf(s.ctx, "[CronScheduler] Already running")
 		return
 	}
 
 	s.running = true
 	s.ticker = time.NewTicker(time.Second)
-	log.Go(s.run)
+	log.Go(s.ctx, s.run)
 
-	log.Infof("[CronScheduler] Started")
+	log.Infof(s.ctx, "[CronScheduler] Started")
 }
 
 // Stop stops the scheduler
@@ -139,7 +139,7 @@ func (s *Scheduler) Stop() {
 		s.ticker = nil
 	}
 
-	log.Infof("[CronScheduler] Stopped")
+	log.Infof(s.ctx, "[CronScheduler] Stopped")
 }
 
 // IsRunning returns whether the scheduler is running
@@ -151,25 +151,25 @@ func (s *Scheduler) IsRunning() bool {
 
 // ========== Scheduler Loop ==========
 
-func (s *Scheduler) run() {
-	log.Infof("[CronScheduler] Scheduler loop started")
+func (s *Scheduler) run(ctx context.Context) {
+	log.Infof(ctx, "[CronScheduler] Scheduler loop started")
 
 	for {
 		select {
 		case <-s.ctx.Done():
-			log.Infof("[CronScheduler] Scheduler loop exited")
+			log.Infof(ctx, "[CronScheduler] Scheduler loop exited")
 			return
 		case <-s.ticker.C:
-			s.tick()
+			s.tick(ctx)
 		}
 	}
 }
 
-func (s *Scheduler) tick() {
+func (s *Scheduler) tick(ctx context.Context) {
 	now := time.Now()
 
 	// Get all tasks
-	tasks := ListAllTasks(s.projectDir)
+	tasks := ListAllTasks(ctx, s.projectDir)
 	if len(tasks) == 0 {
 		return
 	}
@@ -179,7 +179,7 @@ func (s *Scheduler) tick() {
 	for _, task := range tasks {
 		nextFire, err := s.getNextFireTime(task, now)
 		if err != nil {
-			log.Warnf("[CronScheduler] Task %s: failed to get next fire time: %v", task.ID, err)
+			log.Warnf(ctx, "[CronScheduler] Task %s: failed to get next fire time: %v", task.ID, err)
 			continue
 		}
 
@@ -198,12 +198,12 @@ func (s *Scheduler) tick() {
 	}
 
 	// Fire tasks
-	log.Infof("[CronScheduler] Firing %d tasks", len(firedTasks))
+	log.Infof(ctx, "[CronScheduler] Firing %d tasks", len(firedTasks))
 
 	var firedIDs []string
 	for _, task := range firedTasks {
 		// Fire the task
-		log.Infof("[CronScheduler] Firing task %s: %s", task.ID, task.Prompt)
+		log.Infof(ctx, "[CronScheduler] Firing task %s: %s", task.ID, task.Prompt)
 
 		// Call the handler
 		s.mu.RLock()
@@ -219,7 +219,7 @@ func (s *Scheduler) tick() {
 		// Update last fired time for recurring tasks
 		if task.Recurring && task.Durable {
 			firedAt := now.UnixMilli()
-			MarkTasksFired([]string{task.ID}, firedAt, s.projectDir)
+			MarkTasksFired(ctx, []string{task.ID}, firedAt, s.projectDir)
 		}
 	}
 
@@ -232,8 +232,8 @@ func (s *Scheduler) tick() {
 			}
 		}
 		if len(oneShotIDs) > 0 {
-			if err := RemoveTasks(oneShotIDs, s.projectDir); err != nil {
-				log.Errorf("[CronScheduler] Remove one-shot tasks failed: %v", err)
+			if err := RemoveTasks(ctx, oneShotIDs, s.projectDir); err != nil {
+				log.Errorf(ctx, "[CronScheduler] Remove one-shot tasks failed: %v", err)
 			}
 		}
 	}

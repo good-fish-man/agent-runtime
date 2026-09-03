@@ -138,11 +138,11 @@ func (t *pptxInterpreterTool) execLocally(ctx context.Context, jsFile, filename 
 	installCmd := exec.Command("npm", "list", "pptxgenjs")
 	installCmd.Dir = t.workDir
 	if err := installCmd.Run(); err != nil {
-		log.Infof("[pptxInterpreterTool] pptxgenjs not found, installing...")
+		log.Infof(ctx, "[pptxInterpreterTool] pptxgenjs not found, installing...")
 		installCmd = exec.Command("npm", "install", "pptxgenjs", "--silent")
 		installCmd.Dir = t.workDir
 		if err := installCmd.Run(); err != nil {
-			log.Warnf("[pptxInterpreterTool] install pptxgenjs failed: %v", err)
+			log.Warnf(ctx, "[pptxInterpreterTool] install pptxgenjs failed: %v", err)
 		}
 	}
 
@@ -151,11 +151,11 @@ func (t *pptxInterpreterTool) execLocally(ctx context.Context, jsFile, filename 
 	cmd.Dir = t.workDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Errorf("[pptxInterpreterTool] node exec failed: %v, output: %s", err, string(output))
+		log.Errorf(ctx, "[pptxInterpreterTool] node exec failed: %v, output: %s", err, string(output))
 		return "", fmt.Errorf("node exec failed: %s", string(output))
 	}
 
-	log.Infof("[pptxInterpreterTool] node output: %s", string(output))
+	log.Infof(ctx, "[pptxInterpreterTool] node output: %s", string(output))
 
 	// 检查输出文件是否存在
 	if _, err := os.Stat(outputPath); os.IsNotExist(err) {
@@ -173,7 +173,7 @@ func (t *pptxInterpreterTool) execLocally(ctx context.Context, jsFile, filename 
 
 	// 返回PPT URL
 	pptxURL := t.baseURL + "/" + filename
-	log.Infof("[pptxInterpreterTool] PPT generated successfully: %s", pptxURL)
+	log.Infof(ctx, "[pptxInterpreterTool] PPT generated successfully: %s", pptxURL)
 	return pptxURL, nil
 }
 
@@ -215,11 +215,11 @@ func (t *pptxInterpreterTool) execInDocker(ctx context.Context, jsFile, filename
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Errorf("[pptxInterpreterTool] docker exec failed: %v, output: %s", err, string(output))
+		log.Errorf(ctx, "[pptxInterpreterTool] docker exec failed: %v, output: %s", err, string(output))
 		return "", fmt.Errorf("docker exec failed: %s", string(output))
 	}
 
-	log.Infof("[pptxInterpreterTool] docker output: %s", string(output))
+	log.Infof(ctx, "[pptxInterpreterTool] docker output: %s", string(output))
 
 	// 检查输出文件
 	if _, err := os.Stat(outputPath); os.IsNotExist(err) {
@@ -234,7 +234,7 @@ func (t *pptxInterpreterTool) execInDocker(ctx context.Context, jsFile, filename
 
 	// 返回PPT URL
 	pptxURL := t.baseURL + "/" + filename
-	log.Infof("[pptxInterpreterTool] PPT generated via docker: %s", pptxURL)
+	log.Infof(ctx, "[pptxInterpreterTool] PPT generated via docker: %s", pptxURL)
 	return pptxURL, nil
 }
 

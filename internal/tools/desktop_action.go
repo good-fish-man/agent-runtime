@@ -99,7 +99,7 @@ func (t *DesktopActionTool) InvokableRun(ctx context.Context, input string, _ ..
 	if err := json.Unmarshal([]byte(input), &in); err != nil {
 		return "", fmt.Errorf("invalid input: %w", err)
 	}
-	if validation := t.ValidateInput(context.Background(), input); !validation.Valid {
+	if validation := t.ValidateInput(ctx, input); !validation.Valid {
 		return "", fmt.Errorf("invalid desktop action: %s", validation.Message)
 	}
 	in.Query = strings.TrimSpace(in.Query)

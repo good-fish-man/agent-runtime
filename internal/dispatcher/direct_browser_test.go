@@ -173,3 +173,30 @@ func TestCompleteDeviceObservationRecoversFromPrompt(t *testing.T) {
 		t.Fatalf("unexpected recovered completion: handled=%v result=%+v", handled, result)
 	}
 }
+
+func TestBrowserObservationMessageDistinguishesVerificationTerminalStates(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		locale string
+		status string
+		want   string
+	}{
+		{name: "unknown", locale: "en", status: "unknown", want: "not verified yet"},
+		{name: "failed", locale: "en", status: "failed", want: "verification failed"},
+		{name: "conflicting", locale: "zh-CN", status: "conflicting", want: "证据存在冲突"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			state := map[string]any{
+				"effect_trace": map[string]any{
+					"verification_summary": map[string]any{
+						"status": test.status, "satisfied": 1, "unsatisfied": 0, "unknown": 0, "conflicting": 0,
+					},
+				},
+			}
+			got := browserObservationMessage(test.locale, "SUCCEEDED", map[string]any{}, state, map[string]any{})
+			if !strings.Contains(got, test.want) {
+				t.Fatalf("message %q does not contain %q", got, test.want)
+			}
+		})
+	}
+}

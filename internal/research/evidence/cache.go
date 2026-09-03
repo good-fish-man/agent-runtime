@@ -1,6 +1,7 @@
 package evidence
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,7 +30,7 @@ func NewDiskResearchCache(dir string) *DiskResearchCache {
 	return &DiskResearchCache{dir: filepath.Clean(strings.TrimSpace(dir))}
 }
 
-func (c *DiskResearchCache) Get(key string, ttl time.Duration) (Report, bool) {
+func (c *DiskResearchCache) Get(ctx context.Context, key string, ttl time.Duration) (Report, bool) {
 	path, ok := c.path(key)
 	if !ok || ttl <= 0 {
 		return Report{}, false
@@ -37,13 +38,13 @@ func (c *DiskResearchCache) Get(key string, ttl time.Duration) (Report, bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
-			log.Warnw("read persistent research cache failed", "path", path, "error", err)
+			log.Warnw(ctx, "read persistent research cache failed", "path", path, "error", err)
 		}
 		return Report{}, false
 	}
 	var entry persistedEntry
 	if err = json.Unmarshal(data, &entry); err != nil {
-		log.Warnw("decode persistent research cache failed", "path", path, "error", err)
+		log.Warnw(ctx, "decode persistent research cache failed", "path", path, "error", err)
 		return Report{}, false
 	}
 	if entry.Version != diskCacheVersion || time.Since(entry.CreatedAt) >= ttl {
@@ -52,23 +53,23 @@ func (c *DiskResearchCache) Get(key string, ttl time.Duration) (Report, bool) {
 	return entry.Report, true
 }
 
-func (c *DiskResearchCache) Put(key string, report Report) {
+func (c *DiskResearchCache) Put(ctx context.Context, key string, report Report) {
 	path, ok := c.path(key)
 	if !ok || len(report.Items) == 0 {
 		return
 	}
 	if err := os.MkdirAll(c.dir, 0o700); err != nil {
-		log.Warnw("create persistent research cache directory failed", "dir", c.dir, "error", err)
+		log.Warnw(ctx, "create persistent research cache directory failed", "dir", c.dir, "error", err)
 		return
 	}
 	data, err := json.Marshal(persistedEntry{Version: diskCacheVersion, CreatedAt: time.Now().UTC(), Report: report})
 	if err != nil {
-		log.Warnw("encode persistent research cache failed", "key", key, "error", err)
+		log.Warnw(ctx, "encode persistent research cache failed", "key", key, "error", err)
 		return
 	}
 	tmp, err := os.CreateTemp(c.dir, ".research-*.tmp")
 	if err != nil {
-		log.Warnw("create persistent research cache temporary file failed", "dir", c.dir, "error", err)
+		log.Warnw(ctx, "create persistent research cache temporary file failed", "dir", c.dir, "error", err)
 		return
 	}
 	tmpPath := tmp.Name()
@@ -85,7 +86,7 @@ func (c *DiskResearchCache) Put(key string, report Report) {
 		err = os.Rename(tmpPath, path)
 	}
 	if err != nil {
-		log.Warnw("write persistent research cache failed", "path", path, "error", err)
+		log.Warnw(ctx, "write persistent research cache failed", "path", path, "error", err)
 	}
 }
 
@@ -97,8 +98,8 @@ func (c *DiskResearchCache) path(key string) (string, bool) {
 }
 
 type cacheStore interface {
-	Get(string, time.Duration) (Report, bool)
-	Put(string, Report)
+	Get(context.Context, string, time.Duration) (Report, bool)
+	Put(context.Context, string, Report)
 }
 
 // LayeredResearchCache checks memory first, then disk, and promotes disk hits
@@ -116,30 +117,30 @@ func NewLayeredResearchCache(dir string) *LayeredResearchCache {
 	return cache
 }
 
-func (c *LayeredResearchCache) Get(key string, ttl time.Duration) (Report, bool) {
+func (c *LayeredResearchCache) Get(ctx context.Context, key string, ttl time.Duration) (Report, bool) {
 	if c == nil {
 		return Report{}, false
 	}
-	if report, ok := c.memory.Get(key, ttl); ok {
+	if report, ok := c.memory.Get(ctx, key, ttl); ok {
 		return report, true
 	}
 	if c.disk == nil {
 		return Report{}, false
 	}
-	report, ok := c.disk.Get(key, ttl)
+	report, ok := c.disk.Get(ctx, key, ttl)
 	if ok {
-		c.memory.Put(key, report)
+		c.memory.Put(ctx, key, report)
 	}
 	return report, ok
 }
 
-func (c *LayeredResearchCache) Put(key string, report Report) {
+func (c *LayeredResearchCache) Put(ctx context.Context, key string, report Report) {
 	if c == nil {
 		return
 	}
-	c.memory.Put(key, report)
+	c.memory.Put(ctx, key, report)
 	if c.disk != nil {
-		c.disk.Put(key, report)
+		c.disk.Put(ctx, key, report)
 	}
 }
 

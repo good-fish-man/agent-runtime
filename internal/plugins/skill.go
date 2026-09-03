@@ -82,7 +82,7 @@ func (r *SkillRunner) getReportsURL() string {
 }
 
 // SetAutoData 存储脚本输出的 marker 数据
-func (r *SkillRunner) SetAutoData(sessionID string, key string, value string) {
+func (r *SkillRunner) SetAutoData(ctx context.Context, sessionID string, key string, value string) {
 	if r.autoData == nil {
 		r.autoData = make(map[string]map[string]string)
 	}
@@ -90,7 +90,7 @@ func (r *SkillRunner) SetAutoData(sessionID string, key string, value string) {
 		r.autoData[sessionID] = make(map[string]string)
 	}
 	r.autoData[sessionID][key] = value
-	log.Infof("[SkillRunner] SetAutoData for session=%s, key=%s, valueLen=%d", sessionID, key, len(value))
+	log.Infof(ctx, "[SkillRunner] SetAutoData for session=%s, key=%s, valueLen=%d", sessionID, key, len(value))
 }
 
 // GetAutoData 获取存储的 marker 数据
@@ -109,13 +109,13 @@ func (r *SkillRunner) RunSkill(ctx context.Context, name string, input map[strin
 		return "", fmt.Errorf("skill not found: %s", name)
 	}
 
-	log.Infof("[Skill] Running skill: %s, input: %v, sessionID: %s", name, input, sessionID)
+	log.Infof(ctx, "[Skill] Running skill: %s, input: %v, sessionID: %s", name, input, sessionID)
 
 	// 调试：检查 sandbox 配置
 	if r.sandboxCfg != nil {
-		log.Infof("[Skill] sandbox enabled=%v, mode=%s, image=%s", r.sandboxCfg.Enabled, r.sandboxCfg.Mode, r.sandboxCfg.Image)
+		log.Infof(ctx, "[Skill] sandbox enabled=%v, mode=%s, image=%s", r.sandboxCfg.Enabled, r.sandboxCfg.Mode, r.sandboxCfg.Image)
 	} else {
-		log.Infof("[Skill] sandbox cfg is nil")
+		log.Infof(ctx, "[Skill] sandbox cfg is nil")
 	}
 
 	// 转换 input 为字符串
@@ -149,17 +149,17 @@ func (r *SkillRunner) RunSkill(ctx context.Context, name string, input map[strin
 	}
 
 	// 调试：检查 hasScript 状态
-	log.Infof("[Skill] hasScript=%v, sandboxCfg=%v, enabled=%v", hasScript, r.sandboxCfg != nil, r.sandboxCfg != nil && r.sandboxCfg.Enabled)
+	log.Infof(ctx, "[Skill] hasScript=%v, sandboxCfg=%v, enabled=%v", hasScript, r.sandboxCfg != nil, r.sandboxCfg != nil && r.sandboxCfg.Enabled)
 
 	// 如果沙箱启用且有配置，使用沙箱执行（即使没有脚本也可以使用沙箱中的工具）
 	if r.sandboxCfg != nil && r.sandboxCfg.Enabled {
 		// 使用沙箱执行 skill
-		log.Infof("[Skill] Using sandbox execution")
+		log.Infof(ctx, "[Skill] Using sandbox execution")
 		return r.runSkillWithSandbox(ctx, skillForRun, inputStr, sessionID)
 	}
 
 	// 无沙箱时，使用简单的模型调用方式执行 skill
-	log.Infof("[Skill] Falling back to simple execution (sandbox disabled)")
+	log.Infof(ctx, "[Skill] Falling back to simple execution (sandbox disabled)")
 	return r.runSkillSimple(ctx, skill, inputStr)
 }
 
@@ -184,7 +184,7 @@ func (r *SkillRunner) runSkillWithSandbox(ctx context.Context, skill types.Skill
 	if existingDir, ok := r.sessions[sessionID]; ok {
 		// 复用已有 session 目录
 		tmpDir = existingDir
-		log.Infof("[Skill] Reusing existing session workdir: %s for session: %s", tmpDir, sessionID)
+		log.Infof(ctx, "[Skill] Reusing existing session workdir: %s for session: %s", tmpDir, sessionID)
 	} else {
 		// 首次创建 session 工作目录
 		tmpDir, err = os.MkdirTemp("", "skill-session-*")
@@ -192,25 +192,25 @@ func (r *SkillRunner) runSkillWithSandbox(ctx context.Context, skill types.Skill
 			return "", fmt.Errorf("create session dir failed: %w", err)
 		}
 		r.sessions[sessionID] = tmpDir
-		log.Infof("[Skill] Created new session workdir: %s for session: %s", tmpDir, sessionID)
+		log.Infof(ctx, "[Skill] Created new session workdir: %s for session: %s", tmpDir, sessionID)
 	}
 
 	// 4. 复制 skill 文件到工作目录
 	if err := r.copySkillFiles(skillDir, tmpDir); err != nil {
 		return "", fmt.Errorf("copy skill files failed: %w", err)
 	}
-	log.Infof("[Skill] Copied skill files from %s to %s", skillDir, tmpDir)
+	log.Infof(ctx, "[Skill] Copied skill files from %s to %s", skillDir, tmpDir)
 
 	// 5. 创建沙箱工具：list_skill_files, read_skill_file, execute_skill_script_file
 	tools := r.buildSkillSandboxTools(tmpDir, skill, input)
-	log.Infof("[Skill] Built %d sandbox tools", len(tools))
+	log.Infof(ctx, "[Skill] Built %d sandbox tools", len(tools))
 
 	// 5. 构建执行 instruction
 	instruction := r.buildSkillInstruction(skill, input)
-	log.Infof("[Skill] Instruction length: %d", len(instruction))
+	log.Infof(ctx, "[Skill] Instruction length: %d", len(instruction))
 
 	// 6. 使用 adk agent 渐进式执行
-	log.Infof("[Skill] Calling runSkillWithAgent...")
+	log.Infof(ctx, "[Skill] Calling runSkillWithAgent...")
 	return r.runSkillWithAgent(ctx, instruction, tools)
 }
 
@@ -220,11 +220,11 @@ func (r *SkillRunner) runSkillWithAgent(ctx context.Context, instruction string,
 		return "", fmt.Errorf("model not configured for skill execution")
 	}
 
-	log.Infof("[Skill] Creating skill executor agent with %d tools", len(tools))
+	log.Infof(ctx, "[Skill] Creating skill executor agent with %d tools", len(tools))
 	for i, t := range tools {
 		info, _ := t.Info(ctx)
 		if info != nil {
-			log.Infof("[Skill]   Tool[%d]: %s", i, info.Name)
+			log.Infof(ctx, "[Skill]   Tool[%d]: %s", i, info.Name)
 		}
 	}
 
@@ -242,19 +242,19 @@ func (r *SkillRunner) runSkillWithAgent(ctx context.Context, instruction string,
 		},
 	})
 	if err != nil {
-		log.Errorf("[Skill] create skill agent failed: %v", err)
+		log.Errorf(ctx, "[Skill] create skill agent failed: %v", err)
 		return "", fmt.Errorf("create skill agent failed: %w", err)
 	}
-	log.Infof("[Skill] Agent created successfully")
+	log.Infof(ctx, "[Skill] Agent created successfully")
 
 	// 设置超时（增加时间，因为需要调用多次工具）
 	skillCtx, cancel := context.WithTimeout(ctx, constant.DefaultSkillExecTimeoutSec*time.Second)
 	defer cancel()
 
 	// 运行 agent
-	log.Infof("[Skill] Starting agent execution...")
+	log.Infof(ctx, "[Skill] Starting agent execution...")
 	runner := adk.NewRunner(skillCtx, adk.RunnerConfig{EnableStreaming: true, Agent: agent})
-	log.Infof("[Skill] Runner created, starting query...")
+	log.Infof(ctx, "[Skill] Runner created, starting query...")
 	iter := runner.Query(skillCtx, "执行任务")
 
 	// 收集结果
@@ -268,23 +268,23 @@ func (r *SkillRunner) runSkillWithAgent(ctx context.Context, instruction string,
 		}
 		eventCount++
 		if ev == nil {
-			log.Infof("[Skill] Event[%d]: nil event", eventCount)
+			log.Infof(ctx, "[Skill] Event[%d]: nil event", eventCount)
 			continue
 		}
 		if ev.Output == nil {
 			if ev.Err != nil {
-				log.Infof("[Skill] Event[%d]: ev.Output is nil, err=%v", eventCount, ev.Err)
+				log.Infof(ctx, "[Skill] Event[%d]: ev.Output is nil, err=%v", eventCount, ev.Err)
 			} else if ev.Action != nil {
-				log.Infof("[Skill] Event[%d]: ev.Output is nil, action=%+v", eventCount, ev.Action)
+				log.Infof(ctx, "[Skill] Event[%d]: ev.Output is nil, action=%+v", eventCount, ev.Action)
 			} else {
-				log.Infof("[Skill] Event[%d]: ev.Output is nil, no err no action", eventCount)
+				log.Infof(ctx, "[Skill] Event[%d]: ev.Output is nil, no err no action", eventCount)
 			}
 			continue
 		}
 
 		msgOut := ev.Output.MessageOutput
 		if msgOut == nil {
-			log.Infof("[Skill] Event[%d]: ev.Output.MessageOutput is nil", eventCount)
+			log.Infof(ctx, "[Skill] Event[%d]: ev.Output.MessageOutput is nil", eventCount)
 			continue
 		}
 
@@ -292,14 +292,14 @@ func (r *SkillRunner) runSkillWithAgent(ctx context.Context, instruction string,
 		if msgOut.Message != nil && len(msgOut.Message.ToolCalls) > 0 {
 			hasToolCalls = true
 			for _, tc := range msgOut.Message.ToolCalls {
-				log.Infof("[Skill] Event[%d]: tool_call - %s", eventCount, tc.Function.Name)
+				log.Infof(ctx, "[Skill] Event[%d]: tool_call - %s", eventCount, tc.Function.Name)
 			}
 		}
 
 		// 处理 Message
 		if msgOut.Message != nil && strings.TrimSpace(msgOut.Message.Content) != "" {
 			lastContent = msgOut.Message.Content
-			log.Infof("[Skill] Event[%d]: got content, length=%d, hasToolCalls=%v", eventCount, len(lastContent), hasToolCalls)
+			log.Infof(ctx, "[Skill] Event[%d]: got content, length=%d, hasToolCalls=%v", eventCount, len(lastContent), hasToolCalls)
 		}
 
 		// 处理 MessageStream (streaming)
@@ -311,18 +311,18 @@ func (r *SkillRunner) runSkillWithAgent(ctx context.Context, instruction string,
 				}
 				if chunk != nil && strings.TrimSpace(chunk.Content) != "" {
 					lastContent += chunk.Content
-					log.Infof("[Skill] Event[%d]: stream chunk, length=%d", eventCount, len(chunk.Content))
+					log.Infof(ctx, "[Skill] Event[%d]: stream chunk, length=%d", eventCount, len(chunk.Content))
 				}
 			}
 		}
 	}
 
-	log.Infof("[Skill] Agent execution completed, total events=%d, content length=%d, hasToolCalls=%v", eventCount, len(lastContent), hasToolCalls)
+	log.Infof(ctx, "[Skill] Agent execution completed, total events=%d, content length=%d, hasToolCalls=%v", eventCount, len(lastContent), hasToolCalls)
 
 	// 后处理：检查内容是否包含未填充的 HTML 模板占位符
-	finalContent := r.postProcessSkillOutput(lastContent, tools)
+	finalContent := r.postProcessSkillOutput(ctx, lastContent, tools)
 	if finalContent != lastContent {
-		log.Infof("[Skill] Post-processed HTML content, new length=%d", len(finalContent))
+		log.Infof(ctx, "[Skill] Post-processed HTML content, new length=%d", len(finalContent))
 	}
 
 	return finalContent, nil
@@ -375,7 +375,7 @@ func (r *SkillRunner) extractTemplateData(htmlContent string) (string, map[strin
 }
 
 // readReportHTMLFile 根据报告 URL 读取实际的 HTML 文件内容
-func (r *SkillRunner) readReportHTMLFile(reportURL string) string {
+func (r *SkillRunner) readReportHTMLFile(ctx context.Context, reportURL string) string {
 	// reportURL 格式: /uploads/{sessionID}/reports/report_xxx.html
 	// 需要转换为实际的文件路径
 	parts := strings.Split(reportURL, "/uploads/")
@@ -386,14 +386,14 @@ func (r *SkillRunner) readReportHTMLFile(reportURL string) string {
 	filePath := filepath.Join(r.uploadsBaseDir, relPath)
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		log.Infof("[Skill] readReportHTMLFile: failed to read %s: %v", filePath, err)
+		log.Infof(ctx, "[Skill] readReportHTMLFile: failed to read %s: %v", filePath, err)
 		return ""
 	}
 	return string(data)
 }
 
 // saveReportHTMLFile 保存 HTML 内容到报告文件
-func (r *SkillRunner) saveReportHTMLFile(reportURL string, htmlContent string) {
+func (r *SkillRunner) saveReportHTMLFile(ctx context.Context, reportURL string, htmlContent string) {
 	parts := strings.Split(reportURL, "/uploads/")
 	if len(parts) < 2 {
 		return
@@ -401,10 +401,10 @@ func (r *SkillRunner) saveReportHTMLFile(reportURL string, htmlContent string) {
 	relPath := "uploads/" + parts[1]
 	filePath := filepath.Join(r.uploadsBaseDir, relPath)
 	if err := os.WriteFile(filePath, []byte(htmlContent), 0644); err != nil {
-		log.Infof("[Skill] saveReportHTMLFile: failed to write %s: %v", filePath, err)
+		log.Infof(ctx, "[Skill] saveReportHTMLFile: failed to write %s: %v", filePath, err)
 		return
 	}
-	log.Infof("[Skill] saveReportHTMLFile: saved report to %s", filePath)
+	log.Infof(ctx, "[Skill] saveReportHTMLFile: saved report to %s", filePath)
 }
 
 // runSkillSimple 简单模式执行 skill（使用模型分析）
@@ -754,9 +754,9 @@ func (t *skillListFilesTool) Info(ctx context.Context) (*schema.ToolInfo, error)
 }
 
 func (t *skillListFilesTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt ...tool.Option) (string, error) {
-	log.Infof("[skillListFilesTool] InvokableRun called with args: %s", argumentsInJSON)
+	log.Infof(ctx, "[skillListFilesTool] InvokableRun called with args: %s", argumentsInJSON)
 	result := strings.Join(t.files, ", ")
-	log.Infof("[skillListFilesTool] Returning: %s", result)
+	log.Infof(ctx, "[skillListFilesTool] Returning: %s", result)
 	return result, nil
 }
 
@@ -777,7 +777,7 @@ func (t *skillReadFileTool) Info(ctx context.Context) (*schema.ToolInfo, error) 
 }
 
 func (t *skillReadFileTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt ...tool.Option) (string, error) {
-	log.Infof("[skillReadFileTool] InvokableRun called with args: %s", argumentsInJSON)
+	log.Infof(ctx, "[skillReadFileTool] InvokableRun called with args: %s", argumentsInJSON)
 	type req struct {
 		FileName string `json:"file_name"`
 		Offset   int    `json:"offset"`
@@ -820,7 +820,7 @@ func (t *skillReadFileTool) InvokableRun(ctx context.Context, argumentsInJSON st
 	}
 
 	result := string(runes[offset:end])
-	log.Infof("[skillReadFileTool] Returning content length: %d", len(result))
+	log.Infof(ctx, "[skillReadFileTool] Returning content length: %d", len(result))
 	return result, nil
 }
 
@@ -847,7 +847,7 @@ func (t *skillExecCommandTool) Info(ctx context.Context) (*schema.ToolInfo, erro
 }
 
 func (t *skillExecCommandTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt ...tool.Option) (string, error) {
-	log.Infof("[execute_skill_script_file] Received arguments: %s", argumentsInJSON)
+	log.Infof(ctx, "[execute_skill_script_file] Received arguments: %s", argumentsInJSON)
 
 	type req struct {
 		SkillName      string         `json:"skill_name"`
@@ -866,7 +866,7 @@ func (t *skillExecCommandTool) InvokableRun(ctx context.Context, argumentsInJSON
 		return "", fmt.Errorf("script_file_name is required")
 	}
 
-	log.Infof("[execute_skill_script_file] skill_name=%s, script_file_name=%s, args=%v", r.SkillName, r.ScriptFileName, r.Args)
+	log.Infof(ctx, "[execute_skill_script_file] skill_name=%s, script_file_name=%s, args=%v", r.SkillName, r.ScriptFileName, r.Args)
 
 	// 构建脚本路径：scripts/{script_file_name}（文件已被复制到 workDir 根目录）
 	scriptRelPath := r.ScriptFileName
@@ -878,7 +878,7 @@ func (t *skillExecCommandTool) InvokableRun(ctx context.Context, argumentsInJSON
 	scriptPath := filepath.Join("scripts", scriptRelPath)
 	fullScriptPath := filepath.Join(t.workDir, scriptPath)
 
-	log.Infof("[execute_skill_script_file] workDir=%s, fullScriptPath=%s", t.workDir, fullScriptPath)
+	log.Infof(ctx, "[execute_skill_script_file] workDir=%s, fullScriptPath=%s", t.workDir, fullScriptPath)
 
 	// 检查脚本是否存在
 	if _, err := os.Stat(fullScriptPath); os.IsNotExist(err) {
@@ -894,7 +894,7 @@ func (t *skillExecCommandTool) InvokableRun(ctx context.Context, argumentsInJSON
 		command = fmt.Sprintf("python3 %s", fullScriptPath)
 	}
 
-	log.Infof("[execute_skill_script_file] command: %s", command)
+	log.Infof(ctx, "[execute_skill_script_file] command: %s", command)
 
 	// 使用沙箱执行命令
 	if t.sandboxCfg != nil && t.sandboxCfg.Enabled {
@@ -912,12 +912,12 @@ func (t *skillExecCommandTool) InvokableRun(ctx context.Context, argumentsInJSON
 
 	outputText := strings.TrimSpace(string(output))
 	// 提取 auto_data 并保存到文件
-	t.extractAndSaveAutoData(outputText)
+	t.extractAndSaveAutoData(ctx, outputText)
 	return outputText, nil
 }
 
 // extractAndSaveAutoData 从脚本输出中提取 ###KEY_START###...###KEY_END### 标记数据并保存到文件
-func (t *skillExecCommandTool) extractAndSaveAutoData(output string) {
+func (t *skillExecCommandTool) extractAndSaveAutoData(ctx context.Context, output string) {
 	if output == "" || !strings.Contains(output, "###") {
 		return
 	}
@@ -963,14 +963,14 @@ func (t *skillExecCommandTool) extractAndSaveAutoData(output string) {
 		autoDataFile := filepath.Join(t.workDir, ".auto_data.json")
 		dataJSON, err := json.Marshal(autoData)
 		if err != nil {
-			log.Infof("[execute_skill_script_file] failed to marshal auto_data: %v", err)
+			log.Infof(ctx, "[execute_skill_script_file] failed to marshal auto_data: %v", err)
 			return
 		}
 		if err := os.WriteFile(autoDataFile, dataJSON, 0644); err != nil {
-			log.Infof("[execute_skill_script_file] failed to write auto_data file: %v", err)
+			log.Infof(ctx, "[execute_skill_script_file] failed to write auto_data file: %v", err)
 			return
 		}
-		log.Infof("[execute_skill_script_file] saved auto_data with keys: %v to %s", mapKeys(autoData), autoDataFile)
+		log.Infof(ctx, "[execute_skill_script_file] saved auto_data with keys: %v to %s", mapKeys(autoData), autoDataFile)
 	}
 }
 
@@ -1037,7 +1037,7 @@ func (t *skillBashTool) InvokableRun(ctx context.Context, input string, opt ...t
 		return "", fmt.Errorf("invalid input: %w", err)
 	}
 
-	log.Infof("[bash] command: %s", bashInput.Command)
+	log.Infof(ctx, "[bash] command: %s", bashInput.Command)
 
 	// 使用沙箱执行命令
 	if t.sandboxCfg != nil && t.sandboxCfg.Enabled {
@@ -1229,7 +1229,7 @@ func (t *skillBashTool) execInDocker(ctx context.Context, command string, timeou
 	// 添加镜像和命令
 	args = append(args, image, "sh", "-c", command)
 
-	log.Infof("[bash] docker command: docker %v", args)
+	log.Infof(ctx, "[bash] docker command: docker %v", args)
 
 	callCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()
@@ -1358,7 +1358,7 @@ func (t *skillExecCommandTool) execLocally(ctx context.Context, command string) 
 	stderrText := strings.TrimSpace(stderr.String())
 	if stdoutText != "" {
 		// 提取 auto_data 并保存到文件
-		t.extractAndSaveAutoData(stdoutText)
+		t.extractAndSaveAutoData(ctx, stdoutText)
 		return stdoutText, nil
 	}
 	if stderrText != "" {
@@ -1416,7 +1416,7 @@ func (t *skillExecCommandTool) execInDocker(ctx context.Context, command string)
 	// 生成容器名称
 	containerName := fmt.Sprintf("skill-exec-%d", time.Now().UnixNano())
 
-	log.Infof("[execInDocker] image=%s, workdir=%s, command=%s", image, workdir, command)
+	log.Infof(ctx, "[execInDocker] image=%s, workdir=%s, command=%s", image, workdir, command)
 
 	// 构建 docker run 参数
 	args := []string{"run", "--rm", "--name", containerName, "-w", workdir}
@@ -1476,7 +1476,7 @@ func (t *skillExecCommandTool) execInDocker(ctx context.Context, command string)
 
 	args = append(args, "--entrypoint", "", image, "sh", "-c", command)
 
-	log.Infof("[execInDocker] docker args: %v", args)
+	log.Infof(ctx, "[execInDocker] docker args: %v", args)
 
 	// 执行命令
 	callCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
@@ -1493,7 +1493,7 @@ func (t *skillExecCommandTool) execInDocker(ctx context.Context, command string)
 		if stderrText == "" {
 			stderrText = err.Error()
 		}
-		log.Errorf("[execInDocker] failed: %s, stderr: %s", err, stderrText)
+		log.Errorf(ctx, "[execInDocker] failed: %s, stderr: %s", err, stderrText)
 		// 清理容器
 		exec.Command(dockerBin, "rm", "-f", containerName).Run()
 		return "", fmt.Errorf("sandbox exec failed: %s", stderrText)
@@ -1506,7 +1506,7 @@ func (t *skillExecCommandTool) execInDocker(ctx context.Context, command string)
 	stderrText := strings.TrimSpace(stderr.String())
 	if stdoutText != "" {
 		// 提取 auto_data 并保存到文件
-		t.extractAndSaveAutoData(stdoutText)
+		t.extractAndSaveAutoData(ctx, stdoutText)
 		return stdoutText, nil
 	}
 	if stderrText != "" {
@@ -1568,10 +1568,10 @@ func (t *htmlInterpreterTool) InvokableRun(ctx context.Context, argumentsInJSON 
 		data = v
 		// 检查是否缺少 CHART_DATA_JSON，如果是，尝试从其他字段提取
 		if _, hasChartData := data["CHART_DATA_JSON"]; !hasChartData {
-			log.Infof("[htmlInterpreterTool] CHART_DATA_JSON not found in data, attempting to extract from string fields")
-			if chartData := extractChartDataFromMapFields(data); chartData != "" {
+			log.Infof(ctx, "[htmlInterpreterTool] CHART_DATA_JSON not found in data, attempting to extract from string fields")
+			if chartData := extractChartDataFromMapFields(ctx, data); chartData != "" {
 				data["CHART_DATA_JSON"] = chartData
-				log.Infof("[htmlInterpreterTool] Extracted CHART_DATA_JSON from map fields, length=%d", len(chartData))
+				log.Infof(ctx, "[htmlInterpreterTool] Extracted CHART_DATA_JSON from map fields, length=%d", len(chartData))
 			}
 		}
 	case string:
@@ -1579,10 +1579,10 @@ func (t *htmlInterpreterTool) InvokableRun(ctx context.Context, argumentsInJSON 
 		if err := json.Unmarshal([]byte(v), &data); err != nil {
 			// 如果解析失败，说明传入的是原始文本内容
 			// 尝试从 csv-data-analysis 原始输出中提取数据和洞察
-			log.Warnf("[htmlInterpreterTool] data string parse failed: %v, trying csv-data-analysis extraction", err)
-			insights := ExtractCsvInsightsFromRawText(v)
+			log.Warnf(ctx, "[htmlInterpreterTool] data string parse failed: %v, trying csv-data-analysis extraction", err)
+			insights := ExtractCsvInsightsFromRawText(ctx, v)
 			data = insights.ToMap()
-			log.Infof("[htmlInterpreterTool] Extracted csv-data-analysis insights, chart data length=%d", len(insights.ChartDataJSON))
+			log.Infof(ctx, "[htmlInterpreterTool] Extracted csv-data-analysis insights, chart data length=%d", len(insights.ChartDataJSON))
 		}
 	default:
 		return "", fmt.Errorf("data must be object or JSON string, got %T", r.Data)
@@ -1601,7 +1601,7 @@ func (t *htmlInterpreterTool) InvokableRun(ctx context.Context, argumentsInJSON 
 				if _, exists := data[placeholderName]; !exists {
 					// 将 auto_data 的 key 转换为大写作为占位符名
 					data[placeholderName] = v
-					log.Infof("[htmlInterpreterTool] Loaded auto_data: %s, len=%d", placeholderName, len(v))
+					log.Infof(ctx, "[htmlInterpreterTool] Loaded auto_data: %s, len=%d", placeholderName, len(v))
 				}
 			}
 		}
@@ -1650,21 +1650,21 @@ func (t *htmlInterpreterTool) InvokableRun(ctx context.Context, argumentsInJSON 
 
 	// 如果 {{CHART_DATA_JSON}} 仍然存在，尝试从 data 中再次提取
 	if hasChartDataPlaceholder && strings.Contains(html, "{{CHART_DATA_JSON}}") {
-		log.Infof("[htmlInterpreterTool] CHART_DATA_JSON placeholder still unfilled, attempting recovery")
+		log.Infof(ctx, "[htmlInterpreterTool] CHART_DATA_JSON placeholder still unfilled, attempting recovery")
 		// 尝试从 data 的字符串字段中提取
-		if chartData := extractChartDataFromMapFields(data); chartData != "" {
+		if chartData := extractChartDataFromMapFields(ctx, data); chartData != "" {
 			html = strings.ReplaceAll(html, "{{CHART_DATA_JSON}}", chartData)
-			log.Infof("[htmlInterpreterTool] Recovered chart data and injected, length=%d", len(chartData))
+			log.Infof(ctx, "[htmlInterpreterTool] Recovered chart data and injected, length=%d", len(chartData))
 		} else {
 			// 最后尝试：从 data 中找到任何包含 JSON 数组的字符串（charts 通常是数组）
 			for _, v := range data {
 				if str, ok := v.(string); ok {
 					if strings.Contains(str, "[") && strings.Contains(str, "charts") {
 						// 尝试提取 charts 数组
-						chartData := extractChartDataFromMarkers(str)
+						chartData := extractChartDataFromMarkers(ctx, str)
 						if chartData != "" {
 							html = strings.ReplaceAll(html, "{{CHART_DATA_JSON}}", chartData)
-							log.Infof("[htmlInterpreterTool] Extracted charts from field content, length=%d", len(chartData))
+							log.Infof(ctx, "[htmlInterpreterTool] Extracted charts from field content, length=%d", len(chartData))
 							break
 						}
 					}
@@ -1673,13 +1673,13 @@ func (t *htmlInterpreterTool) InvokableRun(ctx context.Context, argumentsInJSON 
 		}
 	}
 
-	log.Infof("[htmlInterpreterTool] Generated HTML report, length=%d", len(html))
+	log.Infof(ctx, "[htmlInterpreterTool] Generated HTML report, length=%d", len(html))
 
 	// 保存 HTML 到文件
 	filename := fmt.Sprintf("report_%d.html", time.Now().UnixNano())
 	filePath := filepath.Join(t.reportsDir, filename)
 	os.WriteFile(filePath, []byte(html), 0644)
-	log.Infof("[htmlInterpreterTool] HTML report saved to: %s", filePath)
+	log.Infof(ctx, "[htmlInterpreterTool] HTML report saved to: %s", filePath)
 
 	// 返回报告 URL（直接返回路径，前端会识别 /uploads/.../reports/*.html 格式）
 	reportURL := t.baseURL + "/" + filename

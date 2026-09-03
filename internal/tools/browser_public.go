@@ -13,6 +13,8 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"github.com/good-fish-man/agent-runtime/internal/actionprotocol"
+	"github.com/good-fish-man/agent-runtime/internal/effectspec"
+	semantics "github.com/good-fish-man/athena-protocol/draft/v0alpha"
 )
 
 const (
@@ -181,11 +183,17 @@ func (t *BrowserTaskTool) InvokableRun(ctx context.Context, input string, _ ...t
 			return "", fmt.Errorf("create browser task session: %w", err)
 		}
 	}
-	return browserClientRequest(ctx, sessionID, "task", map[string]any{
+	arguments := map[string]any{
 		"goal": strings.TrimSpace(in.Goal), "target": strings.TrimSpace(in.Target), "query": strings.TrimSpace(in.Query),
 		"contextual_media_title": in.ContextualMediaTitle,
 		"headed":                 true, "snapshot": true,
-	}, actionprotocol.RiskMedium, actionprotocol.Allow, false, "Executing a reversible browser task on the user's device.")
+	}
+	trace := effectspec.NewBrowserTrace(in.Goal, in.Target, in.Query, sessionID)
+	if err := semantics.PutTrace(arguments, trace); err != nil {
+		return "", fmt.Errorf("attach browser outcome semantics: %w", err)
+	}
+	return browserClientRequest(ctx, sessionID, "task", arguments,
+		actionprotocol.RiskMedium, actionprotocol.Allow, false, "Executing a reversible browser task on the user's device.")
 }
 
 func (t *BrowserOpenTool) Info(context.Context) (*schema.ToolInfo, error) {

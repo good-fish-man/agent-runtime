@@ -155,7 +155,7 @@ func (t *CronCreateTool) ValidateInput(ctx context.Context, argumentsInJSON stri
 	}
 
 	// Check task count limit
-	tasks := ListAllTasks(t.projectDir)
+	tasks := ListAllTasks(ctx, t.projectDir)
 	if len(tasks) >= MaxJobs {
 		return &ValidationResult{
 			Valid:     false,
@@ -192,7 +192,7 @@ func (t *CronCreateTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 	}
 
 	// Add the task
-	task, err := AddTask(input.Cron, input.Prompt, recurring, durable, "")
+	task, err := AddTask(ctx, input.Cron, input.Prompt, recurring, durable, "")
 	if err != nil {
 		return "", fmt.Errorf("add task failed: %w", err)
 	}
@@ -252,7 +252,7 @@ func (t *CronDeleteTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 	}
 
 	// Remove the task
-	if err := RemoveTasks([]string{input.ID}, t.projectDir); err != nil {
+	if err := RemoveTasks(ctx, []string{input.ID}, t.projectDir); err != nil {
 		return "", fmt.Errorf("remove task failed: %w", err)
 	}
 
@@ -290,7 +290,7 @@ func (t *CronListTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 
 // InvokableRun executes the tool
 func (t *CronListTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
-	tasks := ListAllTasks(t.projectDir)
+	tasks := ListAllTasks(ctx, t.projectDir)
 
 	taskInfos := make([]CronTaskInfo, 0, len(tasks))
 	now := time.Now().UnixMilli()

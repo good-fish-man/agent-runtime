@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/good-fish-man/agent-runtime/internal/actionprotocol"
+	semantics "github.com/good-fish-man/athena-protocol/draft/v0alpha"
 )
 
 func TestBrowserOpenUsesExactTargetAndReturnsSession(t *testing.T) {
@@ -44,6 +45,19 @@ func TestBrowserTaskEmitsTaskCapability(t *testing.T) {
 	}
 	if request.Capability != "browser.task" || request.SessionID == "" || request.Arguments["goal"] == "" || request.Arguments["headed"] != true {
 		t.Fatalf("unexpected browser task request: %+v", request)
+	}
+	trace, err := semantics.TraceFromArguments(request.Arguments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trace == nil || trace.Outcome.Goal == "" || trace.Plan.DefinitionHash == "" {
+		t.Fatalf("browser task has no immutable effect plan: %#v", trace)
+	}
+	if trace.Outcome.TargetSpec.Selector.Type != "query" || trace.Outcome.TargetSpec.Selector.Value != "AI Agent tutorials" {
+		t.Fatalf("browser target was not modeled: %#v", trace.Outcome.TargetSpec)
+	}
+	if len(trace.Outcome.DesiredEffects) != 1 || len(trace.Outcome.MustPreserve) != 2 || len(trace.Outcome.ForbiddenEffects) != 1 {
+		t.Fatalf("browser outcome constraints are incomplete: %#v", trace.Outcome)
 	}
 }
 

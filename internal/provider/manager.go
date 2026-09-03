@@ -82,7 +82,7 @@ func (m *Manager) invoke(ctx context.Context, value *binding, capability pluginv
 	scope := invocationScopeFromContext(ctx)
 	trace := pluginv1.InvocationTrace{
 		Schema: pluginv1.Schema, InvocationID: ulid.Make().String(), ProviderID: value.manifest.ProviderID,
-		ProviderVersion: value.manifest.Version, CapabilityID: capability.ID, OwnerID: scope.OwnerID, TaskID: scope.TaskID, TraceID: log.GetReqId(),
+		ProviderVersion: value.manifest.Version, CapabilityID: capability.ID, OwnerID: scope.OwnerID, TaskID: scope.TaskID, TraceID: log.ReqID(ctx),
 		Status: pluginv1.InvocationRunning, PermissionSnapshot: value.entry.GrantedPermissions,
 		ManifestSHA256: value.digest, ResourceSnapshot: value.entry.GrantedResources, InputSHA256: digestString(input), StartedAt: started,
 	}

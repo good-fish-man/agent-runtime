@@ -1,0 +1,9 @@
+(100,1) [arc-v03-w0-incomplete] 08-17T00:00:00.0000 INF fixture span completed span_name=intent.parse cost_ms=1
+(100,1) [arc-v03-w0-incomplete] 08-17T00:00:00.0001 INF fixture span completed span_name=route.plan cost_ms=1
+(100,1) [arc-v03-w0-incomplete] 08-17T00:00:00.0002 INF fixture span completed span_name=world.query cost_ms=1
+(100,1) [arc-v03-w0-incomplete] 08-17T00:00:00.0003 INF fixture span completed span_name=model.invoke cost_ms=1
+(100,1) [arc-v03-w0-incomplete] 08-17T00:00:00.0004 INF fixture span completed span_name=action.policy cost_ms=1
+(100,1) [arc-v03-w0-incomplete] 08-17T00:00:00.0005 INF fixture span completed span_name=action.dispatch cost_ms=1
+(100,1) [arc-v03-w0-incomplete] 08-17T00:00:00.0006 INF fixture span completed span_name=device.execute cost_ms=1
+(100,1) [arc-v03-w0-incomplete] 08-17T00:00:00.0007 INF fixture span completed span_name=perception.observe cost_ms=1
+(100,1) [arc-v03-w0-incomplete] 08-17T00:00:00.0008 INF fixture span completed span_name=world.apply cost_ms=1

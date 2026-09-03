@@ -104,7 +104,7 @@ func (s *TaskStore) saveToDisk() {
 	os.WriteFile(filepath.Join(s.taskDir, ".runner_tasks.json"), data, 0644)
 }
 
-func (s *TaskStore) CreateTask(content, owner string, blockedBy []string) (*Task, error) {
+func (s *TaskStore) CreateTask(ctx context.Context, content, owner string, blockedBy []string) (*Task, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -122,7 +122,7 @@ func (s *TaskStore) CreateTask(content, owner string, blockedBy []string) (*Task
 	}
 
 	s.tasks[id] = task
-	log.Go(func() { s.saveToDisk() })
+	log.Go(ctx, func(context.Context) { s.saveToDisk() })
 
 	return task, nil
 }
@@ -144,7 +144,7 @@ func (s *TaskStore) ListTasks() []*Task {
 	return tasks
 }
 
-func (s *TaskStore) UpdateTask(id string, updates map[string]interface{}) (*Task, error) {
+func (s *TaskStore) UpdateTask(ctx context.Context, id string, updates map[string]interface{}) (*Task, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -172,12 +172,12 @@ func (s *TaskStore) UpdateTask(id string, updates map[string]interface{}) (*Task
 	}
 
 	task.UpdatedAt = now
-	log.Go(func() { s.saveToDisk() })
+	log.Go(ctx, func(context.Context) { s.saveToDisk() })
 
 	return task, nil
 }
 
-func (s *TaskStore) DeleteTask(id string) error {
+func (s *TaskStore) DeleteTask(ctx context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -186,7 +186,7 @@ func (s *TaskStore) DeleteTask(id string) error {
 	}
 
 	delete(s.tasks, id)
-	log.Go(func() { s.saveToDisk() })
+	log.Go(ctx, func(context.Context) { s.saveToDisk() })
 
 	return nil
 }
@@ -258,7 +258,7 @@ func (t *TaskCreateTool) InvokableRun(ctx context.Context, input string, opts ..
 		return "", fmt.Errorf("invalid input: %w", err)
 	}
 
-	task, err := t.store.CreateTask(taskInput.Content, taskInput.Owner, taskInput.BlockedBy)
+	task, err := t.store.CreateTask(ctx, taskInput.Content, taskInput.Owner, taskInput.BlockedBy)
 	if err != nil {
 		return "", err
 	}
@@ -469,7 +469,7 @@ func (t *TaskUpdateTool) InvokableRun(ctx context.Context, input string, opts ..
 		updates["content"] = taskInput.Content
 	}
 
-	task, err := t.store.UpdateTask(taskInput.ID, updates)
+	task, err := t.store.UpdateTask(ctx, taskInput.ID, updates)
 	if err != nil {
 		return "", err
 	}

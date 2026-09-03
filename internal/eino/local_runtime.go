@@ -95,7 +95,7 @@ func ensureOllamaRunning(ctx context.Context) error {
 	}
 	_ = logFile.Close()
 	go func() { _ = command.Wait() }()
-	log.Infof("Ollama was not running; started %s serve (pid=%d)", binary, command.Process.Pid)
+	log.Infof(ctx, "Ollama was not running; started %s serve (pid=%d)", binary, command.Process.Pid)
 
 	deadline := time.NewTimer(ollamaStartupTimeout)
 	defer deadline.Stop()

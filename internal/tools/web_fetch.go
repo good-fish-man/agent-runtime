@@ -159,7 +159,7 @@ func (t *WebFetchTool) InvokableRun(ctx context.Context, input string, opts ...t
 		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
 			return "", fmt.Errorf("fetch canceled: %w", err)
 		}
-		log.WarnwCtx(ctx, "WebFetch could not reach page", "url", fetchInput.URL, "error", err)
+		log.Warnw(ctx, "WebFetch could not reach page", "url", fetchInput.URL, "error", err)
 		return marshalWebFetchOutput(WebFetchOutput{
 			Content: "",
 			URL:     fetchInput.URL,
@@ -177,7 +177,7 @@ func (t *WebFetchTool) InvokableRun(ctx context.Context, input string, opts ...t
 		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
 			return "", fmt.Errorf("read body canceled: %w", err)
 		}
-		log.WarnwCtx(ctx, "WebFetch could not read page", "url", finalURL, "error", err)
+		log.Warnw(ctx, "WebFetch could not read page", "url", finalURL, "error", err)
 		return marshalWebFetchOutput(WebFetchOutput{
 			Content:    "",
 			URL:        finalURL,

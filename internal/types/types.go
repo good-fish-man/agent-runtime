@@ -125,6 +125,7 @@ type ModelRole string
 
 const (
 	ModelRoleDefault   ModelRole = "default"   // 默认模型，用于主对话
+	ModelRoleIntent    ModelRole = "intent"    // 轻量语义意图分类
 	ModelRoleRewrite   ModelRole = "rewrite"   // 改写模型，用于query改写
 	ModelRoleSkill     ModelRole = "skill"     // 技能模型，用于skill执行
 	ModelRoleSummarize ModelRole = "summarize" // 总结模型，用于内容总结

@@ -142,8 +142,8 @@ type EvidencePipeline interface {
 }
 
 type ResearchCache interface {
-	Get(string, time.Duration) (evidence.Report, bool)
-	Put(string, evidence.Report)
+	Get(context.Context, string, time.Duration) (evidence.Report, bool)
+	Put(context.Context, string, evidence.Report)
 }
 
 type Agent struct {
@@ -193,7 +193,7 @@ func (a *Agent) RunWithOptions(ctx context.Context, task Task, budget Budget, op
 	// A cache hit should not spend model tokens merely to recreate a query plan
 	// whose evidence has already been collected for the same task and date.
 	if len(plan.Queries) > 0 && a.cache != nil {
-		if report, ok := a.cache.Get(cacheKey, cacheTTL); ok {
+		if report, ok := a.cache.Get(runCtx, cacheKey, cacheTTL); ok {
 			gaps := a.gaps.Detect(task, plan, report)
 			usage.CacheHits = 1
 			usage.ElapsedMS = time.Since(started).Milliseconds()
@@ -350,7 +350,7 @@ func (a *Agent) RunWithOptions(ctx context.Context, task Task, budget Budget, op
 	}
 	outcome.Result = a.synthesizer.Synthesize(report, finalGaps, usage, stopReason)
 	if len(report.Items) > 0 && a.cache != nil {
-		a.cache.Put(cacheKey, report)
+		a.cache.Put(runCtx, cacheKey, report)
 	}
 	completionMessage := "Research evidence is ready"
 	if len(report.Items) == 0 {

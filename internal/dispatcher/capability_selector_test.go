@@ -2,6 +2,7 @@ package dispatcher
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/good-fish-man/agent-runtime/internal/capability"
@@ -333,8 +334,47 @@ func TestBackgroundMonitorCapabilitiesAreReadOnly(t *testing.T) {
 	}
 }
 
+func TestCapabilityPolicyDisablesEveryBrowserCapabilityWithoutController(t *testing.T) {
+	selected := capability.NewSet(capability.BrowserIDs()...)
+	selected.Add(capability.InternetSearch)
+
+	(capabilityPolicy{desktopBridge: true}).Apply(selected)
+
+	if !selected.Contains(capability.InternetSearch) {
+		t.Fatal("browser policy removed unrelated internet capability")
+	}
+	for _, id := range selected.IDs() {
+		if capability.IsBrowser(id) {
+			t.Fatalf("disabled browser controller retained %s: %v", id, selected.IDs())
+		}
+	}
+}
+
+func TestCapabilityPolicyComposesExclusionsAndExecutionGuards(t *testing.T) {
+	selected := capability.NewSet(
+		capability.InternetSearch,
+		capability.InternetFetch,
+		capability.BrowserRead,
+		capability.DesktopAction,
+		capability.AutomationSchedule,
+		capability.OrchestrationGoal,
+	)
+	policy := capabilityPolicy{
+		excluded:                []string{capability.InternetFetch},
+		persistentGoalExecution: true,
+		desktopBridge:           false,
+		browserController:       true,
+	}
+	policy.Apply(selected)
+
+	want := []string{capability.InternetSearch, capability.BrowserRead}
+	if got := selected.IDs(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("policy result = %v, want %v", got, want)
+	}
+}
+
 func TestShippedSkillRouting(t *testing.T) {
-	skills := plugins.DiscoverSkillsFromDir("../../skills")
+	skills := plugins.DiscoverSkillsFromDir(context.Background(), "../../skills")
 	if len(skills) < 6 {
 		t.Fatalf("discovered %d shipped skills, want at least 6", len(skills))
 	}

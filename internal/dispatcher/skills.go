@@ -37,7 +37,7 @@ func (d *Dispatcher) buildSkillTools(ctx context.Context) []tool.BaseTool {
 	}
 	configMgr, err := plugins.NewSkillConfigManager(configPath)
 	if err != nil {
-		log.Warnf("[Dispatcher] skills: failed to load skill config: %v", err)
+		log.Warnf(ctx, "[Dispatcher] skills: failed to load skill config: %v", err)
 		configMgr, _ = plugins.NewSkillConfigManager("")
 	}
 
@@ -79,16 +79,16 @@ func (d *Dispatcher) buildSkillTools(ctx context.Context) []tool.BaseTool {
 		out = append(out, plugins.NewCreateSkillToolForDir(skillsDir))
 	}
 
-	log.Infof("[Dispatcher] skills: registered %d skill(s), %d skill tool(s)", len(skills), len(out))
+	log.Infof(ctx, "[Dispatcher] skills: registered %d skill(s), %d skill tool(s)", len(skills), len(out))
 	return out
 }
 
-func (d *Dispatcher) discoverSkills() (string, []types.Skill) {
+func (d *Dispatcher) discoverSkills(ctx context.Context) (string, []types.Skill) {
 	skillsDir := d.resolveSkillsDir()
-	log.Infof("[Dispatcher] skills: using skills_dir: %s", skillsDir)
-	skills := plugins.LoadSkills(d.req.Skills, skillsDir)
+	log.Infof(ctx, "[Dispatcher] skills: using skills_dir: %s", skillsDir)
+	skills := plugins.LoadSkills(ctx, d.req.Skills, skillsDir)
 	if d.cfg.SkillsGlobalDir != "" {
-		skills = plugins.MergeSkills(skills, plugins.DiscoverSkillsFromDir(d.cfg.SkillsGlobalDir))
+		skills = plugins.MergeSkills(skills, plugins.DiscoverSkillsFromDir(ctx, d.cfg.SkillsGlobalDir))
 	}
 	return skillsDir, skills
 }

@@ -753,10 +753,10 @@ func runReadOnlyToolInvocations(ctx context.Context, invocations []toolInvocatio
 	var wg sync.WaitGroup
 	wg.Add(workers)
 	for range workers {
-		log.Go(func() {
+		log.Go(ctx, func(workerCtx context.Context) {
 			defer wg.Done()
 			for index := range jobs {
-				runToolInvocation(ctx, &invocations[index])
+				runToolInvocation(workerCtx, &invocations[index])
 			}
 		})
 	}

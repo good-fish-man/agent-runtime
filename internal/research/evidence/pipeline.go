@@ -4,6 +4,7 @@
 package evidence
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"net/url"
@@ -258,7 +259,7 @@ func NewResearchCache() *ResearchCache {
 	return &ResearchCache{entries: make(map[string]cacheEntry)}
 }
 
-func (c *ResearchCache) Get(key string, ttl time.Duration) (Report, bool) {
+func (c *ResearchCache) Get(_ context.Context, key string, ttl time.Duration) (Report, bool) {
 	if c == nil || key == "" || ttl <= 0 {
 		return Report{}, false
 	}
@@ -271,7 +272,7 @@ func (c *ResearchCache) Get(key string, ttl time.Duration) (Report, bool) {
 	return entry.report, true
 }
 
-func (c *ResearchCache) Put(key string, report Report) {
+func (c *ResearchCache) Put(_ context.Context, key string, report Report) {
 	if c == nil || key == "" || len(report.Items) == 0 {
 		return
 	}

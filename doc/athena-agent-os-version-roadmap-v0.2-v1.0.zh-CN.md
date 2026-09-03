@@ -4,12 +4,15 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 文档版本 | `1.0-draft` |
-| 当前代码基线 | `v0.1.5` |
+| 文档版本 | `1.1-rebased` |
+| 当前代码基线 | `v0.1.7` 修复线 + `architecture/agent-os-roadmap-v1.0` 架构集成分支 |
 | 规划范围 | `v0.2.0` 至 `v1.0.0` |
 | 适用仓库 | `agent-runtime`、`agent-runtime-client`、`athena-launcher`、`frontend/agent-ui`、`logx`、规划中的 `athena-protocol` |
 | 核心目标 | 把 Athena 从“LLM + 工具集合”演进为可持续运行、可验证、可学习、可治理的 Personal Agent OS |
 | 文档性质 | 跨仓库规范性路线图；各版本实施文档必须服从本计划的职责边界和发布门槛 |
+| 当前路线状态 | `v0.2` 内部实现、本地 7 场景打包跨进程运行和本地可执行门禁已大幅收口，但签名安装、完整打包 500 Journey、完整十 Span Trace 与生产覆盖率门禁仍未关闭；`v0.3` W1-W5 已形成工程证据，Release 尚未完成 |
+| 架构语义 | `v0.3` Core Invariants 与四层职责 **FROZEN** |
+| 契约成熟度 | Object Schema 为 `draft/v0alpha`；Storage 与新增 Wire Contract 未冻结 |
 
 ---
 
@@ -17,14 +20,24 @@
 
 Athena 当前已经拥有 Intent、RoutePlan、Capability Registry、Research、设备 WebSocket、Browser Runtime、Perception 和前端执行面板等基础能力，但这些能力仍分散在不同仓库，并存在协议重复、状态所有权不清和执行结果闭环不完整的问题。
 
-因此，后续版本不能直接进入“自我进化”。正确顺序是：
+因此，后续版本不能直接进入“自我进化”。重整后的依赖顺序是：
 
 ```text
-v0.1.5 当前基线
+当前状态
+    ├── v0.2 内部实现与本地测试已完成
+    └── v0.3 Browser Semantic Slice 已形成验证证据
     ↓
-v0.2 统一执行内核
+V3-W0：关闭 v0.2 外部门禁
     ↓
-v0.3 经验与评测基础
+V3-W1：语义基线与 Browser Golden Path
+    ↓
+V3-W2：Browser Failure Matrix
+    ↓
+V3-W3：Experience、隐私与保留
+    ↓
+V3-W4：Evaluation、Replay 与 Retrieval
+    ↓
+V3-W5：Evidence Review 与 Release Gate
     ↓
 v0.4 Skill / Strategy 候选学习
     ↓
@@ -86,6 +99,43 @@ v1.0 Personal Agent OS GA
 3. 不在同一版本同时重写执行内核和引入学习系统。
 4. 新功能必须走统一协议，不再增加特殊 JSON、特殊 Tool Markup 或 Frontend 转发链路。
 5. 每个版本先通过退出门槛，再允许下一版本进入开发。
+
+### 2.4 权威边界与防偏移规则
+
+Athena 不再使用一份文档同时冻结架构、字段和发布状态。四类决策分别由不同证据控制：
+
+| 决策层 | 权威来源 | 当前状态 | 允许变化方式 |
+| --- | --- | --- | --- |
+| 架构语义 | `v0.3 Architecture Plan` 的 12 条 Core Invariants、四层职责和 World State Authority 所有权 | **FROZEN** | 只能通过 Architecture ADR 重新评审 |
+| 版本范围与门槛 | 本路线图 | `v0.2-v1.0` 规范主线 | 修改版本边界必须同时更新中英文路线图和依赖门槛 |
+| 内部对象与实现 | `draft/v0alpha`、内部 Fixture、可回滚 Migration | Draft | 允许根据真实 Slice 证据调整，不承诺兼容 |
+| 稳定 Wire/Storage Contract | 已发布 Protocol、Schema Hash、正式 Migration Contract | 新对象尚未冻结 | 必须经过兼容性、跨语言 Fixture、升级/回滚和 ADR 评审 |
+
+发生冲突时，不使用“最新文档覆盖旧文档”的隐式规则：架构文档决定**语义是什么**，本路线图决定**在哪个版本交付**，已发布协议决定**线上兼容边界**。无法归类的变更必须暂停并提交 ADR。
+
+以下规则是所有后续版本的硬约束：
+
+1. Browser Vertical Slice 通过不等于 `v0.3` Release 完成。
+2. `v0.2` 外部门禁未关闭前，可以保留 `v0.3` 原型证据，但不得发布 `v0.3`，也不得开始 `v0.4` Candidate Learning。
+3. 新概念必须同时映射到一条 Core Invariant、当前版本目标、责任仓库和可执行测试；缺少任意一项就进入 Backlog，不进入主线。
+4. 单个 Browser Slice 不能直接冻结数据库表、公共 RPC 或事件字段。
+5. `v0.3` 只记录、检索和离线评测；任何自动 Candidate 生成、Promotion、Canary 或生产行为修改都属于版本越界。
+6. 每个版本必须维护“已完成、下一步、明确不做、退出证据”四栏状态；代码合并不能替代 Gate 证据。
+7. 下一版本只能消费前一版本已通过 Gate 的产物，不能依赖计划中但尚未验收的对象。
+
+### 2.5 版本依赖主干
+
+| 版本 | 只消费哪些已验证产物 | 本版唯一新增层 | 禁止提前引入 |
+| --- | --- | --- | --- |
+| `v0.2` | 现有用户、Agent、模型和设备能力 | 统一 Task/Action/Observation、World 与设备执行内核 | Experience Mining、Candidate、Promotion |
+| `v0.3` | 已验收的执行内核与真实 Observation | Effect Verification、Experience、Evaluation、Retrieval | 自动 Skill、在线 Canary、Ontology 自学习 |
+| `v0.4` | 脱敏 Experience 与稳定离线评测集 | 声明式 Skill/Strategy Candidate 与人工评审 | 自动激活、生产流量实验、代码执行 |
+| `v0.5` | 已评审 Candidate 与可重复 Benchmark | AgentBuild、RunManifest、Shadow、低风险 Canary、Rollback | 自动 R2/R3 Canary、核心自修改 |
+| `v0.6` | 可追溯 Experience、Evaluation 和 Build | Evidence Knowledge、Conflict、Freshness、受控 Ontology | 无证据知识晋升、Ontology 自学习 |
+| `v0.7` | 稳定 Task/World/Knowledge/Build | 长期 Goal、多 Agent、Checkpoint、跨设备恢复 | 无预算自治、绕过 Policy 的 Delegation |
+| `v0.8` | 冻结 Capability Contract 与稳定治理内核 | SDK、签名 Plugin、Sandbox、Registry | 未签名执行器、Plugin 修改 Kernel/Auth |
+| `v0.9` | 功能边界冻结的完整系统 | 安全、备份、升级、签名、HA、压测和 SLO | 新增主要架构概念 |
+| `v1.0` | 通过生产门禁的 `v0.9` | 协议冻结、核心用户旅程与 GA 支持承诺 | 未经新版本流程的破坏性变化 |
 
 ---
 
@@ -550,6 +600,8 @@ rc.1     upgrade rehearsal + release manifest
 
 ## 8. v0.3.0：经验与评测基础
 
+> Effect-Centric 语义基线、概念对象和 Browser 验证链路详见 [Athena Agent OS v0.3 架构设计方案](./agent-os-architecture-plan-v0.3.zh-CN.md)。本节继续作为发布范围和 Release Gate 的权威来源。
+
 ### 8.1 版本目标
 
 让 Athena 能够安全回答：
@@ -563,13 +615,32 @@ rc.1     upgrade rehearsal + release manifest
 
 本版本只达到 `E1-E2`：记录和检索，不自动改变生产行为。
 
+本版本同时使用 Browser Vertical Slice 验证已经冻结的架构语义。概念对象保持 `draft/v0alpha`；存储模型和新 Wire Protocol 不在本版本开始时冻结。
+
 ### 8.2 进入条件
 
 - `v0.2` 所有退出门槛通过。
 - Task、Action、Observation 和 World Revision 已稳定。
 - 数据脱敏规范经过安全评审。
 
-### 8.3 Experience 定义
+### 8.3 Release Workstream 与当前状态
+
+以下 Workstream 是 `v0.3` 内部交付顺序，不是新的公开版本号。只有全部门槛通过后，才能把 `v0.3.0` 标记为完成：
+
+| Workstream | 目的与交付物 | 当前状态 | 退出证据 |
+| --- | --- | --- | --- |
+| `V3-W0` 前置门禁对账 | 完成 `v0.2` 数据库回滚、三平台安装包、7 个 E2E、500 次 Soak、Span 与凭据审计 | **PARTIAL / BLOCKING**：数据库回滚、未签名跨平台结构、Browser 10/10、组件 500/500、本地打包 7 Journey 与 Release Corpus 凭据扫描已通过；三平台签名安装、完整打包 500 Soak、同一 Trace 的完整十 Span、95% 生产覆盖率仍需外部执行 | [最终证据聚合](./v0.3-evidence-review.zh-CN.md)保持 `release_ready=false`，直至 `v0.2-release-readiness` 的剩余外部门禁全部有可审计记录 |
+| `V3-W1` 语义基线与 Golden Path | 冻结 Core Invariants；实现 `draft/v0alpha`；贯通 Outcome 到 Experience；真实播放第二个视频 | **工程实现完成** | 严格校验、全量回归、真实媒体播放和同 Session E2E 通过 |
+| `V3-W2` Browser Failure Matrix | Snapshot Drift、目标消失、Login-required、Unknown、Forbidden Effect、Cancel 与重试边界 | **工程实现完成** | 每个场景都有 Observation、Verification、终态、Trace 和 Replay Fixture |
+| `V3-W3` Experience 与隐私 | 内部 Draft 持久化、异步生成、Redaction、Retention/Delete、Owner Isolation、用户开关 | **工程实现完成；生产覆盖率待 V3-W0 环境采样** | 95% 终态覆盖、Secret 泄漏为 0、删除与跨用户隔离测试通过 |
+| `V3-W4` Evaluation、Replay 与 Retrieval | Fixture、Suite、Run、基线比较、检索预算和污染防护 | **工程实现完成** | Replay 可重复；历史检索不能覆盖当前 Observation；离线指标可比较 |
+| `V3-W5` Evidence Review 与 Release | 统计真实使用字段、删除无证据字段、决定继续内部 Metadata 还是提出新协议 ADR | **工程评审完成；Release 受 V3-W0 阻塞** | [证据评审](./v0.3-evidence-review.zh-CN.md) 与 [ADR-0001](./adr/0001-v0.3-semantics-carriage.zh-CN.md)；不冻结新协议 |
+
+当前 `V3-W1 → V3-W5` 的工程实现与证据允许保留和继续修正，但不能绕过仍开放的 `V3-W0` 外部门禁发布 `v0.3`，也不能进入 `v0.4`。`os_experience*` 等表继续作为可回滚的内部实现使用，其字段、表名和公共 API 都不构成冻结契约。
+
+`V3-W1` 完成只证明对象边界能够支撑一个真实任务，不证明 Experience 产品、隐私生命周期、评测系统或整个 `v0.3` 已达到发布标准。`V3-W*` 专门表示版本交付 Workstream；`R0-R3` 继续只表示行为风险等级。
+
+### 8.4 Experience 定义
 
 Experience 不是完整聊天转储，也不是原始思维链。它是一次任务执行的脱敏、结构化总结：
 
@@ -597,7 +668,7 @@ Experience
 └── provenance
 ```
 
-### 8.4 隐私与保留
+### 8.5 隐私与保留
 
 - Experience 写入前执行 Redaction，不允许写后再清洗。
 - 明文凭据、Cookie、Token、表单密码、身份证件和支付信息永不保存。
@@ -607,7 +678,15 @@ Experience
 - 删除通过 Payload 删除/密钥销毁和 Tombstone 实现，不破坏审计一致性。
 - 不同用户和组织的 Experience 不能互相检索，公共数据必须显式发布。
 
-### 8.5 交付范围
+### 8.6 交付范围
+
+#### Browser Semantic Baseline Validation
+
+- 使用“播放当前页面中的第二个视频”验证 OutcomeSpec、TargetSpec、TargetResolution、PlanCandidate、PlanRun、ActionAttempt、Observation、VerificationResult 和 ExperienceRecord 的完整关联。
+- Target Resolution 必须绑定页面 Snapshot、Evidence 和精确 Read Set；页面变化时重新 Grounding，不能复用旧 Ordinal、坐标或 CDP Target。
+- Action 成功不等于 Outcome 成功；媒体播放必须由 Clause 级 Effect Verification 证明。
+- `unknown` 触发有预算的补充 Observation，`unsatisfied` 进入受限重试、补偿或 Replan，`conflicting` 进入冲突消解或人工接管。
+- 继续使用现有 Protocol v4 Action/Observation；概念字段先通过内部 Fixture 和 Event Correlation 验证。
 
 #### Experience Engine
 
@@ -652,7 +731,7 @@ USER_INTERRUPTION
 - 检索结果进入 Planner 前必须有数量、Token、时间和敏感度预算。
 - 检索内容以“历史参考”标记，不能覆盖当前 Observation。
 
-### 8.6 数据模型
+### 8.7 数据模型
 
 ```text
 os_experience
@@ -666,14 +745,14 @@ os_evaluation_run
 os_evaluation_result
 ```
 
-### 8.7 前端交付
+### 8.8 前端交付
 
 - 用户可查看某 Task 如何形成 Experience。
 - 用户可关闭学习、删除个人 Experience、调整保留期限。
 - 管理员可查看失败分类、模型/Capability 成本和评测结果。
 - 不展示内部思维链，只展示可解释的决策摘要和证据。
 
-### 8.8 测试计划
+### 8.9 测试计划
 
 - Secret/PII Redaction Corpus。
 - Cross-user Isolation Test。
@@ -682,8 +761,11 @@ os_evaluation_result
 - Fixture 可重复性测试。
 - Mock Browser/Device Replay 测试。
 - Retrieval 污染和 Prompt Injection 测试。
+- Browser Golden Path、Snapshot Drift、Login-required、Forbidden-effect、Unknown 和 Cancel 测试。
+- Outcome-to-Experience Correlation 完整性测试。
+- Target Read Set 精确失效和 Effect Clause 四态验证测试。
 
-### 8.9 验收门槛
+### 8.10 验收门槛
 
 - 95% 以上终态 Task 能形成结构化 Experience；其余必须记录跳过原因。
 - Secret Corpus 泄漏率为 0。
@@ -691,13 +773,19 @@ os_evaluation_result
 - 同一 Fixture 重复运行结果一致。
 - Retrieval 对当前 World State 的覆盖次数为 0。
 - 没有 Candidate 自动影响生产规划。
+- Browser Golden Path 能形成完整 Outcome-to-Experience Trace，并证明真实媒体播放，而不是只证明点击成功。
+- 页面刷新、目标消失或 Tab 关闭后不会执行旧 TargetResolution。
+- Forbidden Effect 违反会覆盖普通 Desired Effect 成功。
+- 现有 Protocol v4 Contract Test 全部继续通过。
 
-### 8.10 明确不做
+### 8.11 明确不做
 
 - 自动创建或激活 Skill。
 - 在线 Canary。
 - 动态修改 Planner Prompt。
 - Ontology 自学习。
+- 冻结新的对象字段、数据库表或 Wire Protocol。
+- 通用机器人物理模型和生产级 Exploratory Affordance 执行。
 
 ---
 
@@ -1523,13 +1611,15 @@ operation A
 
 ## 20. 分支、Tag 与跨仓库发布
 
-### 20.1 v0.2 开发阶段
+### 20.1 当前架构集成阶段
 
-- 当前 `main` 保留 `v0.1.x` 修复。
-- 使用 `architecture/agent-os-v0.2` 完成破坏性架构迁移。
+- `main` 保留稳定的 `v0.1.7` 修复线。
+- `architecture/agent-os-roadmap-v1.0` 是当前唯一长期架构集成分支，承载已经同步的 `v0.1.7` 修复、`v0.2` 内部实现和 `v0.3` 验证工作。
+- `main` 的关键修复必须经过评审后同步到架构分支；禁止再创建并行的 `agent-os-v0.2`、`agent-os-v0.3` 长期分支。
+- `V3-W0` 未关闭前不得把内部实现标记为正式 `v0.2` Release；`V3-W5` 未关闭前不得标记 `v0.3.0`。
 - Protocol 首先 Tag，然后 Runtime、Control Plane、Launcher、Frontend 按兼容矩阵升级。
 
-### 20.2 v0.2 以后
+### 20.2 v0.3 Release 以后
 
 - 回归 Trunk-based Development。
 - 短期 Feature Branch + Pull Request。
@@ -1586,27 +1676,28 @@ logx
 
 ## 23. 最终建议执行顺序
 
-近期只启动以下工作：
+当前只允许执行以下队列：
 
 ```text
-1. 审批本路线图和 v0.2 ADR。
-2. 创建 athena-protocol 仓库。
-3. 冻结 Action/Observation v4 Schema。
-4. 在 Control Plane 建立 Task Controller。
-5. 迁移现有 agent_control_*。
-6. 让 Runtime 只输出 Decision/Action Proposal。
-7. 让 Launcher 只执行并返回 Observation。
-8. 让 Frontend 只消费统一 Task Event。
-9. 完成 v0.2 故障注入和跨平台验收。
-10. v0.2 达标后才开始 Experience Schema。
+1. V3-W0：补齐 v0.2 外部门禁证据，不重新设计已经完成的内部主干。
+2. 保留 V3-W1 的 Golden Path 与 draft/v0alpha 证据；除非失败证据触发 ADR，否则不重新打开架构语义。
+3. V3-W2：完成 Browser Failure Matrix、终态、Trace 和 Replay Fixture。
+4. V3-W3：仅在 V3-W0/V3-W2 通过后，完成 Experience 的隐私与数据生命周期。
+5. V3-W4：完成确定性 Replay、离线 Evaluation、历史 Retrieval 与污染防护。
+6. V3-W5：基于真实字段使用情况做 Evidence Review，删除无证据字段并决定是否提出协议 ADR。
+7. V3-W5 通过后发布 v0.3.0；此后才允许启动 v0.4 Candidate Learning。
 ```
 
-不要同时启动：
+Stop Rule：任何 Workstream 未通过时，只修复该 Workstream 或它的依赖，不通过“新增抽象”绕过失败；代码合并、表已经存在、单个 E2E 通过或演示成功都不能代替 Release Gate。
+
+在 `V3-W5` 之前明确禁止：
 
 ```text
+冻结新增 Object Schema、Storage Model 或 Wire Contract
 Ontology Learning
-Automatic Skill Promotion
+Skill / Strategy Candidate Promotion
 Generated Capability Code
+Online Canary
 Public Plugin Marketplace
 Physical Agent Runtime
 ```

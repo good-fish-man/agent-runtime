@@ -26,7 +26,7 @@ type CsvDataAnalysisReportPlaceholders struct {
 // ExtractCsvInsightsFromRawText 从原始文本中提取 csv-data-analysis 报告所需的数据
 // 当 inner agent 直接输出 csv_analyzer 的原始结果（包含 ###CHART_DATA_JSON_START###...###CHART_DATA_JSON_END### 标记）时
 // 使用此函数提取报告所需的数据
-func ExtractCsvInsightsFromRawText(rawText string) *CsvDataAnalysisReportPlaceholders {
+func ExtractCsvInsightsFromRawText(ctx context.Context, rawText string) *CsvDataAnalysisReportPlaceholders {
 	result := &CsvDataAnalysisReportPlaceholders{
 		LANG:                 "zh",
 		ReportTitle:          "数据分析报告",
@@ -40,7 +40,7 @@ func ExtractCsvInsightsFromRawText(rawText string) *CsvDataAnalysisReportPlaceho
 	}
 
 	// 提取图表数据
-	chartData := extractChartDataFromMarkers(rawText)
+	chartData := extractChartDataFromMarkers(ctx, rawText)
 	if chartData != "" {
 		result.ChartDataJSON = chartData
 	}
@@ -49,12 +49,12 @@ func ExtractCsvInsightsFromRawText(rawText string) *CsvDataAnalysisReportPlaceho
 }
 
 // extractChartDataFromMarkers 从 HTML 内容中提取 CHART_DATA_JSON
-func extractChartDataFromMarkers(htmlContent string) string {
+func extractChartDataFromMarkers(ctx context.Context, htmlContent string) string {
 	// 查找 ###CHART_DATA_JSON_START###...###CHART_DATA_JSON_END### 标记
 	startMarker := "###CHART_DATA_JSON_START###"
 	endMarker := "###CHART_DATA_JSON_END###"
 
-	log.Infof("[extractChartDataFromMarkers] Input length=%d, searching for marker: %s", len(htmlContent), startMarker)
+	log.Infof(ctx, "[extractChartDataFromMarkers] Input length=%d, searching for marker: %s", len(htmlContent), startMarker)
 
 	startIdx := strings.Index(htmlContent, startMarker)
 	if startIdx == -1 {
@@ -62,7 +62,7 @@ func extractChartDataFromMarkers(htmlContent string) string {
 		startMarker = "CHART_DATA_JSON_START"
 		endMarker = "CHART_DATA_JSON_END"
 		startIdx = strings.Index(htmlContent, startMarker)
-		log.Infof("[extractChartDataFromMarkers] Try without ### prefix, found at: %d", startIdx)
+		log.Infof(ctx, "[extractChartDataFromMarkers] Try without ### prefix, found at: %d", startIdx)
 	}
 
 	if startIdx == -1 {
@@ -70,15 +70,15 @@ func extractChartDataFromMarkers(htmlContent string) string {
 		if previewLen > len(htmlContent) {
 			previewLen = len(htmlContent)
 		}
-		log.Infof("[extractChartDataFromMarkers] No chart data markers found. Content preview: %.200s...", htmlContent[:previewLen])
+		log.Infof(ctx, "[extractChartDataFromMarkers] No chart data markers found. Content preview: %.200s...", htmlContent[:previewLen])
 		return ""
 	}
 
-	log.Infof("[extractChartDataFromMarkers] Found start marker at index %d", startIdx)
+	log.Infof(ctx, "[extractChartDataFromMarkers] Found start marker at index %d", startIdx)
 	startIdx += len(startMarker)
 	endIdx := strings.Index(htmlContent[startIdx:], endMarker)
 	if endIdx == -1 {
-		log.Infof("[extractChartDataFromMarkers] Found start marker but no end marker")
+		log.Infof(ctx, "[extractChartDataFromMarkers] Found start marker but no end marker")
 		return ""
 	}
 
@@ -89,17 +89,17 @@ func extractChartDataFromMarkers(htmlContent string) string {
 	if previewLen > len(chartData) {
 		previewLen = len(chartData)
 	}
-	log.Infof("[extractChartDataFromMarkers] Extracted chart data, length=%d, preview: %.100s...", len(chartData), chartData[:previewLen])
+	log.Infof(ctx, "[extractChartDataFromMarkers] Extracted chart data, length=%d, preview: %.100s...", len(chartData), chartData[:previewLen])
 	return chartData
 }
 
 // extractChartDataFromMapFields 从 map 的字符串字段中提取 CHART_DATA_JSON
 // 当 data 是 map 但缺少 CHART_DATA_JSON 时调用此函数
-func extractChartDataFromMapFields(data map[string]any) string {
+func extractChartDataFromMapFields(ctx context.Context, data map[string]any) string {
 	for _, v := range data {
 		if str, ok := v.(string); ok && str != "" {
 			if strings.Contains(str, "CHART_DATA_JSON_START") || strings.Contains(str, "CHART_DATA") {
-				chartData := extractChartDataFromMarkers(str)
+				chartData := extractChartDataFromMarkers(ctx, str)
 				if chartData != "" {
 					return chartData
 				}
@@ -300,14 +300,14 @@ func (p *CsvDataAnalysisReportPlaceholders) ToMap() map[string]any {
 
 // postProcessSkillOutput 后处理 skill 输出，检测并处理未填充的模板
 // 当 inner agent 没有正确调用 htmlInterpreterTool 时，由 outer agent 后处理
-func (r *SkillRunner) postProcessSkillOutput(content string, tools []tool.BaseTool) string {
+func (r *SkillRunner) postProcessSkillOutput(ctx context.Context, content string, tools []tool.BaseTool) string {
 	// 调试：记录原始内容
-	log.Infof("[Skill] PostProcess: input content length=%d, preview=%.200s...", len(content), content[:min(200, len(content))])
+	log.Infof(ctx, "[Skill] PostProcess: input content length=%d, preview=%.200s...", len(content), content[:min(200, len(content))])
 
 	// 检查是否是 csv_analyzer 的原始 JSON 输出（包含 ###CHART_DATA_JSON_START### 标记）
 	if strings.Contains(content, "###CHART_DATA_JSON_START###") {
-		log.Infof("[Skill] PostProcess: Detected csv_analyzer raw output with chart data markers, processing...")
-		return r.processCsvAnalyzerOutput(content, tools)
+		log.Infof(ctx, "[Skill] PostProcess: Detected csv_analyzer raw output with chart data markers, processing...")
+		return r.processCsvAnalyzerOutput(ctx, content, tools)
 	}
 
 	// 检查是否包含未填充的模板占位符
@@ -315,22 +315,22 @@ func (r *SkillRunner) postProcessSkillOutput(content string, tools []tool.BaseTo
 		// 如果内容不包含模板占位符，检查是否是报告 URL
 		// 报告 URL 格式：/uploads/{sessionID}/reports/report_xxx.html
 		if strings.Contains(content, "/uploads/") && strings.Contains(content, "/reports/report_") {
-			log.Infof("[Skill] PostProcess: Detected report URL: %s", content)
+			log.Infof(ctx, "[Skill] PostProcess: Detected report URL: %s", content)
 			// 读取实际的 HTML 文件并检查是否有未填充的占位符
-			htmlContent := r.readReportHTMLFile(content)
+			htmlContent := r.readReportHTMLFile(ctx, content)
 			if htmlContent != "" && strings.Contains(htmlContent, "{{CHART_DATA_JSON}}") {
-				log.Infof("[Skill] PostProcess: Report HTML has unfilled {{CHART_DATA_JSON}}, attempting to fix")
+				log.Infof(ctx, "[Skill] PostProcess: Report HTML has unfilled {{CHART_DATA_JSON}}, attempting to fix")
 				// 尝试提取 chart data 并注入
-				chartData := extractChartDataFromMarkers(htmlContent)
+				chartData := extractChartDataFromMarkers(ctx, htmlContent)
 				if chartData != "" {
 					htmlContent = strings.ReplaceAll(htmlContent, "{{CHART_DATA_JSON}}", chartData)
-					r.saveReportHTMLFile(content, htmlContent)
-					log.Infof("[Skill] PostProcess: Injected chart data into report HTML")
+					r.saveReportHTMLFile(ctx, content, htmlContent)
+					log.Infof(ctx, "[Skill] PostProcess: Injected chart data into report HTML")
 				}
 			}
 			return content
 		}
-		log.Infof("[Skill] PostProcess: content does not contain {{ or report URL, returning as-is")
+		log.Infof(ctx, "[Skill] PostProcess: content does not contain {{ or report URL, returning as-is")
 		return content
 	}
 
@@ -339,12 +339,12 @@ func (r *SkillRunner) postProcessSkillOutput(content string, tools []tool.BaseTo
 		return content
 	}
 
-	log.Infof("[Skill] PostProcess: Detected unfilled HTML template, attempting to process")
+	log.Infof(ctx, "[Skill] PostProcess: Detected unfilled HTML template, attempting to process")
 
 	// 找到 htmlInterpreterTool
 	var htmlTool *htmlInterpreterTool
 	for _, t := range tools {
-		if info, _ := t.Info(context.Background()); info != nil && info.Name == "html_interpreter" {
+		if info, _ := t.Info(ctx); info != nil && info.Name == "html_interpreter" {
 			if hit, ok := t.(*htmlInterpreterTool); ok {
 				htmlTool = hit
 				break
@@ -352,14 +352,14 @@ func (r *SkillRunner) postProcessSkillOutput(content string, tools []tool.BaseTo
 		}
 	}
 	if htmlTool == nil {
-		log.Infof("[Skill] PostProcess: html_interpreter tool not found")
+		log.Infof(ctx, "[Skill] PostProcess: html_interpreter tool not found")
 		return content
 	}
 
 	// 尝试提取模板路径和数据
 	templatePath, data := r.extractTemplateData(content)
 	if templatePath == "" || data == nil {
-		log.Infof("[Skill] PostProcess: Could not extract template path or data")
+		log.Infof(ctx, "[Skill] PostProcess: Could not extract template path or data")
 		return content
 	}
 
@@ -369,24 +369,24 @@ func (r *SkillRunner) postProcessSkillOutput(content string, tools []tool.BaseTo
 		"data":          data,
 	}
 	argsJSON, _ := json.Marshal(args)
-	result, err := htmlTool.InvokableRun(context.Background(), string(argsJSON))
+	result, err := htmlTool.InvokableRun(ctx, string(argsJSON))
 	if err != nil {
-		log.Infof("[Skill] PostProcess: html_interpreter failed: %v", err)
+		log.Infof(ctx, "[Skill] PostProcess: html_interpreter failed: %v", err)
 		return content
 	}
 
-	log.Infof("[Skill] PostProcess: html_interpreter succeeded, result length=%d", len(result))
+	log.Infof(ctx, "[Skill] PostProcess: html_interpreter succeeded, result length=%d", len(result))
 
 	// 检查结果中是否还包含未替换的 {{CHART_DATA_JSON}}
 	if strings.Contains(result, "{{CHART_DATA_JSON}}") {
-		log.Infof("[Skill] PostProcess: Result still contains {{CHART_DATA_JSON}} placeholder, attempting to inject chart data")
+		log.Infof(ctx, "[Skill] PostProcess: Result still contains {{CHART_DATA_JSON}} placeholder, attempting to inject chart data")
 		// 从 content 中提取图表数据
-		chartData := extractChartDataFromMarkers(content)
+		chartData := extractChartDataFromMarkers(ctx, content)
 		if chartData != "" {
 			result = strings.ReplaceAll(result, "{{CHART_DATA_JSON}}", chartData)
-			log.Infof("[Skill] PostProcess: Re-extracted and injected chart data, new length=%d", len(result))
+			log.Infof(ctx, "[Skill] PostProcess: Re-extracted and injected chart data, new length=%d", len(result))
 		} else {
-			log.Infof("[Skill] PostProcess: Failed to extract chart data from content")
+			log.Infof(ctx, "[Skill] PostProcess: Failed to extract chart data from content")
 		}
 	}
 
@@ -394,11 +394,11 @@ func (r *SkillRunner) postProcessSkillOutput(content string, tools []tool.BaseTo
 }
 
 // processCsvAnalyzerOutput 处理 csv_analyzer 的原始输出，调用 htmlInterpreterTool 生成报告
-func (r *SkillRunner) processCsvAnalyzerOutput(content string, tools []tool.BaseTool) string {
+func (r *SkillRunner) processCsvAnalyzerOutput(ctx context.Context, content string, tools []tool.BaseTool) string {
 	// 找到 htmlInterpreterTool
 	var htmlTool *htmlInterpreterTool
 	for _, t := range tools {
-		if info, _ := t.Info(context.Background()); info != nil && info.Name == "html_interpreter" {
+		if info, _ := t.Info(ctx); info != nil && info.Name == "html_interpreter" {
 			if hit, ok := t.(*htmlInterpreterTool); ok {
 				htmlTool = hit
 				break
@@ -406,21 +406,21 @@ func (r *SkillRunner) processCsvAnalyzerOutput(content string, tools []tool.Base
 		}
 	}
 	if htmlTool == nil {
-		log.Infof("[Skill] PostProcess: html_interpreter tool not found")
+		log.Infof(ctx, "[Skill] PostProcess: html_interpreter tool not found")
 		return content
 	}
 
 	// 使用 ExtractCsvInsightsFromRawText 提取数据
-	insights := ExtractCsvInsightsFromRawText(content)
+	insights := ExtractCsvInsightsFromRawText(ctx, content)
 	data := insights.ToMap()
 
 	// 调试日志：检查提取的数据
-	log.Infof("[Skill] PostProcess: ChartDataJSON present in map: %v", data["CHART_DATA_JSON"] != nil && data["CHART_DATA_JSON"] != "")
+	log.Infof(ctx, "[Skill] PostProcess: ChartDataJSON present in map: %v", data["CHART_DATA_JSON"] != nil && data["CHART_DATA_JSON"] != "")
 	if data["CHART_DATA_JSON"] != nil {
-		log.Infof("[Skill] PostProcess: ChartDataJSON length: %d, preview: %.100s...",
+		log.Infof(ctx, "[Skill] PostProcess: ChartDataJSON length: %d, preview: %.100s...",
 			len(data["CHART_DATA_JSON"].(string)), data["CHART_DATA_JSON"].(string))
 	}
-	log.Infof("[Skill] PostProcess: Extracted chart data length=%d, execSummary length=%d",
+	log.Infof(ctx, "[Skill] PostProcess: Extracted chart data length=%d, execSummary length=%d",
 		len(insights.ChartDataJSON), len(insights.ExecSummary))
 
 	// 调用 html_interpreter
@@ -430,12 +430,12 @@ func (r *SkillRunner) processCsvAnalyzerOutput(content string, tools []tool.Base
 		"data":          data,
 	}
 	argsJSON, _ := json.Marshal(args)
-	result, err := htmlTool.InvokableRun(context.Background(), string(argsJSON))
+	result, err := htmlTool.InvokableRun(ctx, string(argsJSON))
 	if err != nil {
-		log.Infof("[Skill] PostProcess: html_interpreter failed: %v", err)
+		log.Infof(ctx, "[Skill] PostProcess: html_interpreter failed: %v", err)
 		return content
 	}
 
-	log.Infof("[Skill] PostProcess: html_interpreter succeeded, result length=%d", len(result))
+	log.Infof(ctx, "[Skill] PostProcess: html_interpreter succeeded, result length=%d", len(result))
 	return result
 }

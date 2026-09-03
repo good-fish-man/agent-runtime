@@ -37,7 +37,7 @@ func NewBackgroundReviewer(cfg ReviewConfig, store *MemStore) *BackgroundReviewe
 
 // ReviewIfNeeded launches an async review when the exchange looks worth
 // remembering. It returns immediately.
-func (r *BackgroundReviewer) ReviewIfNeeded(model eino.ModelConfig, sessionID, userID, agentID, userInput, assistantOutput string) {
+func (r *BackgroundReviewer) ReviewIfNeeded(ctx context.Context, model eino.ModelConfig, sessionID, userID, agentID, userInput, assistantOutput string) {
 	if r == nil || !r.cfg.Enabled || r.store == nil {
 		return
 	}
@@ -53,18 +53,18 @@ func (r *BackgroundReviewer) ReviewIfNeeded(model eino.ModelConfig, sessionID, u
 	r.active = true
 	r.mu.Unlock()
 
-	log.Go(func() {
+	backgroundCtx := context.WithoutCancel(ctx)
+	log.Go(backgroundCtx, func(reviewCtx context.Context) {
 		defer func() {
 			r.mu.Lock()
 			r.active = false
 			r.mu.Unlock()
 		}()
 
-		ctx := context.Background()
 		extractor := NewExtractor(model)
-		mems, err := extractor.Extract(ctx, userInput, assistantOutput)
+		mems, err := extractor.Extract(reviewCtx, userInput, assistantOutput)
 		if err != nil {
-			log.Errorf("[memory] background extract failed: %v", err)
+			log.Errorf(reviewCtx, "[memory] background extract failed: %v", err)
 			return
 		}
 		if len(mems) == 0 {
@@ -73,15 +73,15 @@ func (r *BackgroundReviewer) ReviewIfNeeded(model eino.ModelConfig, sessionID, u
 		if len(mems) > r.cfg.MaxMemory {
 			mems = mems[:r.cfg.MaxMemory]
 		}
-		if err := r.store.SaveExtracted(ctx, sessionID, userID, agentID, mems); err != nil {
-			log.Errorf("[memory] background save failed: %v", err)
+		if err := r.store.SaveExtracted(reviewCtx, sessionID, userID, agentID, mems); err != nil {
+			log.Errorf(reviewCtx, "[memory] background save failed: %v", err)
 			return
 		}
 		// Refresh session snapshot so subsequent turns see new memories.
 		if sessionID != "" {
-			_ = r.store.InitializeSession(ctx, sessionID)
+			_ = r.store.InitializeSession(reviewCtx, sessionID)
 		}
-		log.Infof("[memory] background review saved %d memories (session=%s)", len(mems), sessionID)
+		log.Infof(reviewCtx, "[memory] background review saved %d memories (session=%s)", len(mems), sessionID)
 	})
 }
 

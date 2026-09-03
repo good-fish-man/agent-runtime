@@ -39,8 +39,11 @@ type AgentPool struct {
 }
 
 // NewAgentPool 创建代理池
-func NewAgentPool(manager *SubAgentManager, config PoolConfig) *AgentPool {
-	ctx, cancel := context.WithCancel(context.Background())
+func NewAgentPool(ctx context.Context, manager *SubAgentManager, config PoolConfig) *AgentPool {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithCancel(ctx)
 	return &AgentPool{
 		config:  config,
 		manager: manager,
@@ -67,21 +70,21 @@ func (p *AgentPool) Spawn(tasks map[string]string) []*AgentResult {
 	for agentID, task := range tasks {
 		p.wg.Add(1)
 		aid, t := agentID, task
-		log.Go(func() {
+		log.Go(p.ctx, func(taskCtx context.Context) {
 			defer p.wg.Done()
 			if semaphore != nil {
 				semaphore <- struct{}{}        // 获取信号量
 				defer func() { <-semaphore }() // 释放信号量
 			}
 
-			result := p.runTask(aid, t)
+			result := p.runTask(taskCtx, aid, t)
 			localResults <- result
 		})
 	}
 
 	// 等待所有任务完成或超时
 	done := make(chan struct{})
-	log.Go(func() {
+	log.Go(p.ctx, func(context.Context) {
 		p.wg.Wait()
 		close(done)
 	})
@@ -117,7 +120,7 @@ func (p *AgentPool) Spawn(tasks map[string]string) []*AgentResult {
 }
 
 // runTask 运行单个任务
-func (p *AgentPool) runTask(agentID, task string) *AgentResult {
+func (p *AgentPool) runTask(ctx context.Context, agentID, task string) *AgentResult {
 	taskID := p.manager.NextTaskID()
 	start := time.Now()
 
@@ -127,10 +130,10 @@ func (p *AgentPool) runTask(agentID, task string) *AgentResult {
 	}
 
 	// 创建子 context 用于超时控制
-	taskCtx := p.ctx
+	taskCtx := ctx
 	if p.config.Timeout > 0 {
 		var cancel context.CancelFunc
-		taskCtx, cancel = context.WithTimeout(p.ctx, p.config.Timeout)
+		taskCtx, cancel = context.WithTimeout(ctx, p.config.Timeout)
 		defer cancel()
 	}
 
@@ -197,9 +200,9 @@ func (p *AgentPool) GetRunningAgents() []*SubAgent {
 // ============ 改进的 SubAgent 等待机制 ============
 
 // ResultChannel 返回一个 channel，当 agent 完成时发送结果
-func (a *SubAgent) ResultChannel() <-chan *SubAgentResult {
+func (a *SubAgent) ResultChannel(ctx context.Context) <-chan *SubAgentResult {
 	ch := make(chan *SubAgentResult, 1)
-	log.Go(func() {
+	log.Go(ctx, func(context.Context) {
 		// 等待直到有结果或被取消
 		for {
 			result := a.GetResult()

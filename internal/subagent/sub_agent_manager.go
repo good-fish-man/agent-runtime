@@ -99,17 +99,17 @@ func (m *SubAgentManager) NextTaskID() string {
 }
 
 // RegisterConfigs 注册 Sub-Agent 配置
-func (m *SubAgentManager) RegisterConfigs(configs []SubAgentConfig) {
+func (m *SubAgentManager) RegisterConfigs(ctx context.Context, configs []SubAgentConfig) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	for i := range configs {
 		cfg := &configs[i]
 		m.configs[cfg.ID] = cfg
-		log.Infof("[SubAgentManager] Registered sub-agent: %s (%s)", cfg.ID, cfg.Name)
+		log.Infof(ctx, "[SubAgentManager] Registered sub-agent: %s (%s)", cfg.ID, cfg.Name)
 	}
 
-	log.Infof("[SubAgentManager] Total registered: %d sub-agents", len(m.configs))
+	log.Infof(ctx, "[SubAgentManager] Total registered: %d sub-agents", len(m.configs))
 }
 
 // RegisterTool 注册工具到管理器
@@ -170,8 +170,8 @@ func (m *SubAgentManager) Run(ctx context.Context, id string, task string) (*Sub
 
 	// 异步执行
 	errCh := make(chan error, 1)
-	log.Go(func() {
-		errCh <- agent.Run(ctx, task)
+	log.Go(ctx, func(childCtx context.Context) {
+		errCh <- agent.Run(childCtx, task)
 		close(errCh)
 	})
 
@@ -195,7 +195,7 @@ func (m *SubAgentManager) RunAsync(ctx context.Context, id string, task string) 
 		return nil, err
 	}
 
-	log.Go(func() { agent.Run(context.Background(), task) })
+	log.Go(ctx, func(childCtx context.Context) { _ = agent.Run(childCtx, task) })
 
 	return agent, nil
 }
@@ -249,6 +249,11 @@ func (m *SubAgentManager) Cleanup(id string) {
 
 // Spawn 启动一个异步任务，立即返回 task_id
 func (m *SubAgentManager) Spawn(ctx context.Context, agentID string, task string) (*TaskInfo, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	backgroundCtx := context.WithoutCancel(ctx)
+
 	// 检查 agent 配置是否存在
 	m.mu.RLock()
 	cfg, ok := m.configs[agentID]
@@ -274,7 +279,7 @@ func (m *SubAgentManager) Spawn(ctx context.Context, agentID string, task string
 	m.taskMu.Unlock()
 
 	// 创建 agent（使用新的 context，避免被主 context 取消）
-	agent, err := newSubAgent(ctx, cfg, m.defaultModel, cfg.RuntimeTools)
+	agent, err := newSubAgent(backgroundCtx, cfg, m.defaultModel, cfg.RuntimeTools)
 	if err != nil {
 		taskInfo.Status = TaskStatusFailed
 		return nil, fmt.Errorf("create sub-agent failed: %w", err)
@@ -287,11 +292,11 @@ func (m *SubAgentManager) Spawn(ctx context.Context, agentID string, task string
 
 	// 后台执行
 	taskInfo.Status = TaskStatusRunning
-	log.Go(func() {
-		log.Infof("[SubAgentManager] Task %s started for agent %s", taskID, agentID)
-		err := agent.Run(context.Background(), task)
+	log.Go(backgroundCtx, func(childCtx context.Context) {
+		log.Infof(childCtx, "[SubAgentManager] Task %s started for agent %s", taskID, agentID)
+		err := agent.Run(childCtx, task)
 		if err != nil {
-			log.Infof("[SubAgentManager] Task %s failed: %v", taskID, err)
+			log.Infof(childCtx, "[SubAgentManager] Task %s failed: %v", taskID, err)
 			taskInfo.Status = TaskStatusFailed
 		} else {
 			result := agent.GetResult()
@@ -301,7 +306,7 @@ func (m *SubAgentManager) Spawn(ctx context.Context, agentID string, task string
 				taskInfo.Status = TaskStatusCompleted
 			}
 			taskInfo.Result = result
-			log.Infof("[SubAgentManager] Task %s completed, output length: %d", taskID, len(result.Output))
+			log.Infof(childCtx, "[SubAgentManager] Task %s completed, output length: %d", taskID, len(result.Output))
 		}
 	})
 

@@ -21,11 +21,22 @@ type Config struct {
 	Server     ServerConfig     `yaml:"server"`
 	DB         DBConfig         `yaml:"db"`
 	Memory     MemoryConfig     `yaml:"memory"`
+	Intent     IntentConfig     `yaml:"intent"`
 	Research   ResearchConfig   `yaml:"research"`
 	Sandbox    SandboxConfig    `yaml:"sandbox"`
 	Skills     SkillsConfig     `yaml:"skills"`
 	Plugins    PluginsConfig    `yaml:"plugins"`
 	Operations OperationsConfig `yaml:"operations"`
+}
+
+// IntentConfig controls deterministic language packs and the optional
+// model-assisted intent classifier.
+type IntentConfig struct {
+	Mode             string  `yaml:"mode"`
+	TimeoutMS        int     `yaml:"timeout_ms"`
+	MinConfidence    float64 `yaml:"min_confidence"`
+	MaxHistory       int     `yaml:"max_history"`
+	LanguagePacksDir string  `yaml:"language_packs_dir"`
 }
 
 // ServerConfig holds listen addresses and default model settings.
@@ -149,6 +160,12 @@ func Default() Config {
 			MaxReviewMemory:  constant.DefaultMaxReviewMemory,
 			InjectIntoPrompt: true,
 		},
+		Intent: IntentConfig{
+			Mode:          "hybrid",
+			TimeoutMS:     4000,
+			MinConfidence: 0.75,
+			MaxHistory:    4,
+		},
 		Research: ResearchConfig{
 			Enabled:                  true,
 			Providers:                []string{"web", "github", "wikipedia", "arxiv", "news"},
@@ -206,13 +223,34 @@ func Load(path string) (Config, error) {
 	}
 
 	applyEnvOverrides(&cfg)
-	resolveSkillPaths(&cfg, path)
+	if err := validateIntentConfig(cfg.Intent); err != nil {
+		return cfg, err
+	}
+	resolvePaths(&cfg, path)
 	return cfg, nil
 }
 
-// resolveSkillPaths makes relative skill paths stable regardless of the process
+func validateIntentConfig(config IntentConfig) error {
+	switch strings.ToLower(strings.TrimSpace(config.Mode)) {
+	case "rules", "shadow", "hybrid":
+	default:
+		return fmt.Errorf("intent.mode must be rules, shadow, or hybrid")
+	}
+	if config.TimeoutMS <= 0 || config.TimeoutMS > 60000 {
+		return fmt.Errorf("intent.timeout_ms must be between 1 and 60000")
+	}
+	if config.MinConfidence <= 0 || config.MinConfidence > 1 {
+		return fmt.Errorf("intent.min_confidence must be greater than 0 and at most 1")
+	}
+	if config.MaxHistory <= 0 || config.MaxHistory > 20 {
+		return fmt.Errorf("intent.max_history must be between 1 and 20")
+	}
+	return nil
+}
+
+// resolvePaths makes relative resource paths stable regardless of the process
 // working directory. Paths in config are interpreted relative to config.yaml.
-func resolveSkillPaths(cfg *Config, configPath string) {
+func resolvePaths(cfg *Config, configPath string) {
 	baseDir := "."
 	if configPath != "" {
 		if abs, err := filepath.Abs(configPath); err == nil {
@@ -228,6 +266,9 @@ func resolveSkillPaths(cfg *Config, configPath string) {
 		if *target != "" && !filepath.IsAbs(*target) {
 			*target = filepath.Clean(filepath.Join(baseDir, *target))
 		}
+	}
+	if cfg.Intent.LanguagePacksDir != "" && !filepath.IsAbs(cfg.Intent.LanguagePacksDir) {
+		cfg.Intent.LanguagePacksDir = filepath.Clean(filepath.Join(baseDir, cfg.Intent.LanguagePacksDir))
 	}
 	if cfg.Research.CacheDir != "" && !filepath.IsAbs(cfg.Research.CacheDir) {
 		cfg.Research.CacheDir = filepath.Clean(filepath.Join(baseDir, cfg.Research.CacheDir))
@@ -292,6 +333,26 @@ func applyEnvOverrides(cfg *Config) {
 	applyPositiveIntEnv(constant.EnvResearchMaxPages, &cfg.Research.MaxPages)
 	applyPositiveIntEnv(constant.EnvResearchMaxRounds, &cfg.Research.MaxRounds)
 	applyPositiveIntEnv(constant.EnvResearchTimeoutSec, &cfg.Research.TimeoutSec)
+	applyBoolEnv(constant.EnvDBEnabled, &cfg.DB.Enabled)
+	if v := os.Getenv(constant.EnvDBType); v != "" {
+		cfg.DB.DBType = v
+	}
+	if v := os.Getenv(constant.EnvDBHost); v != "" {
+		cfg.DB.DBHost = v
+	}
+	applyPositiveIntEnv(constant.EnvDBPort, &cfg.DB.DBPort)
+	if v := os.Getenv(constant.EnvDBUser); v != "" {
+		cfg.DB.Username = v
+	}
+	if v := os.Getenv(constant.EnvDBPassword); v != "" {
+		cfg.DB.Password = v
+	}
+	if v := os.Getenv(constant.EnvDBName); v != "" {
+		cfg.DB.DBName = v
+	}
+	if v := os.Getenv(constant.EnvDBSSLMode); v != "" {
+		cfg.DB.SSLMode = v
+	}
 }
 
 func defaultPluginsConfig() PluginsConfig {

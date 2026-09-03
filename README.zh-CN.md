@@ -4,7 +4,7 @@
 
 GA 指南：[Personal Agent OS 1.0 Runtime](doc/personal-agent-os-ga-v1.0.zh-CN.md) | [English](doc/personal-agent-os-ga-v1.0.md)
 
-架构设计：[Agent OS 分版本落地计划 v0.2-v1.0](doc/athena-agent-os-version-roadmap-v0.2-v1.0.zh-CN.md) | [Agent OS v0.2 详细架构](doc/agent-os-architecture-plan-v0.2.zh-CN.md) | [v0.2 跨仓库兼容矩阵](doc/v0.2-compatibility-matrix.zh-CN.md) | [v0.2 发布就绪报告](doc/v0.2-release-readiness.zh-CN.md) | [Athena Agent Architecture v2](doc/architecture-v2.md) | [Personal AI Operating System Specification v1.0](doc/personal-ai-os-spec-v1.md)
+架构设计：[Agent OS 分版本落地计划 v0.2-v1.0](doc/athena-agent-os-version-roadmap-v0.2-v1.0.zh-CN.md) | [Agent OS v0.2 详细架构](doc/agent-os-architecture-plan-v0.2.zh-CN.md) | [Agent OS v0.3 Effect-Centric 架构](doc/agent-os-architecture-plan-v0.3.zh-CN.md) | [v0.3 证据评审](doc/v0.3-evidence-review.zh-CN.md) | [v0.3 协议 ADR](doc/adr/0001-v0.3-semantics-carriage.zh-CN.md) | [v0.2 跨仓库兼容矩阵](doc/v0.2-compatibility-matrix.zh-CN.md) | [v0.2 发布就绪报告](doc/v0.2-release-readiness.zh-CN.md) | [Athena Agent Architecture v2](doc/architecture-v2.md) | [Personal AI Operating System Specification v1.0](doc/personal-ai-os-spec-v1.md)
 
 浏览器使用：[常见浏览器命令](https://github.com/good-fish-man/athena-launcher/blob/main/docs/browser-command-guide.md#简体中文)
 
@@ -24,6 +24,7 @@ Runtime 会输出类型化的研究进度、查询词、证据、置信度和最
 - OpenAI 兼容模型路由，包括本地 Ollama 模型。
 - 文件、Shell、联网、计划、任务和图片生成工具。
 - 根据请求相关性选择 Tools 与 Skills，而不是一次性把所有能力发送给模型。
+- 失败即关闭地加载当前 RunManifest 固定、经过人工批准的不可变 Runtime Artifact；Artifact 只能组织能力，不能授予能力。
 - Skills、知识库检索、上传文件上下文和 Sub-Agent 编排。
 - 面向项目目录的代码读取、搜索、编辑和写入能力。
 - 可选的 PostgreSQL 长期记忆与后台记忆整理。
@@ -58,7 +59,7 @@ flowchart LR
 
 1. 接入层接收请求，并把 `X-Trace-Id` 传入 gRPC metadata 和 context。
 2. Server 解析模型配置，并按需加载长期记忆。
-3. Dispatcher 为当前请求选择相关 Tools 和最多若干个最相关 Skills。
+3. Dispatcher 校验保留字段中的 Runtime Artifact Bundle，在通用 Prompt 渲染前消费原始数据，并且只选择本次运行已经具备所需能力的已评审计划。
 4. 新闻、旅行、对比或显式调研请求会先进入 Research Agent：生成按来源分类的查询计划，在预算内搜索和抓取，排序并核验证据，并在仍有重要缺口时自动补查。
 5. Eino Runner 执行模型/工具循环，并在配置后协调 Sub-Agents。
 6. 返回完整结果，或返回 `meta`、`delta`、`tool_call`、`error`、`done` 等流式事件。

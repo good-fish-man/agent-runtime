@@ -104,7 +104,7 @@ func GenerateVideo(ctx context.Context, model types.ModelConfig, input VideoGene
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = log.NewError("GenerateVideo", "panic: %v", recovered)
-			log.ErrorfCtx(ctx, "model call panic model=%s mode=video_generate error=%v\n%s", model.Name, recovered, debug.Stack())
+			log.Errorf(ctx, "model call panic model=%s mode=video_generate error=%v\n%s", model.Name, recovered, debug.Stack())
 		} else if err != nil {
 			err = log.WrapError(err, "GenerateVideo")
 		}

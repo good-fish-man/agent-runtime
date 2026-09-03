@@ -22,6 +22,7 @@ import (
 	"github.com/good-fish-man/agent-runtime/internal/database"
 	"github.com/good-fish-man/agent-runtime/internal/dispatcher"
 	"github.com/good-fish-man/agent-runtime/internal/eino"
+	"github.com/good-fish-man/agent-runtime/internal/intent"
 	"github.com/good-fish-man/agent-runtime/internal/memory"
 	"github.com/good-fish-man/agent-runtime/internal/operations"
 	"github.com/good-fish-man/agent-runtime/internal/provider"
@@ -41,26 +42,32 @@ import (
 )
 
 func main() {
+	ctx := context.Background()
 	configPath := config.ResolvePath("")
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	for {
-		restart, err := serve(configPath, quit)
+		restart, err := serve(ctx, configPath, quit)
 		if err != nil {
-			log.Fatalf("runtime service failed: %v", err)
+			log.Fatalf(ctx, "runtime service failed: %v", err)
 		}
 		if !restart {
 			return
 		}
-		log.Infof("restarting agent-runtime with updated configuration...")
+		log.Infof(ctx, "restarting agent-runtime with updated configuration...")
 	}
 }
 
-func serve(configPath string, quit <-chan os.Signal) (bool, error) {
+func serve(ctx context.Context, configPath string, quit <-chan os.Signal) (bool, error) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return false, fmt.Errorf("load config: %w", err)
 	}
+	intentCatalog, err := intent.LoadLanguagePacks(cfg.Intent.LanguagePacksDir)
+	if err != nil {
+		return false, fmt.Errorf("load intent language packs: %w", err)
+	}
+	log.Infof(ctx, "intent language packs loaded locales=%v", intentCatalog.Locales())
 	pluginConfig := provider.Config{
 		Enabled: cfg.Plugins.Enabled, Directory: cfg.Plugins.Dir, RegistryPath: cfg.Plugins.RegistryPath,
 		TrustStorePath: cfg.Plugins.TrustStorePath, AuditPath: cfg.Plugins.AuditPath,
@@ -73,14 +80,14 @@ func serve(configPath string, quit <-chan os.Signal) (bool, error) {
 		}
 		return report, nil
 	}
-	pluginReportValue, pluginErr := reloadPlugins(context.Background())
+	pluginReportValue, pluginErr := reloadPlugins(ctx)
 	pluginReport, _ := pluginReportValue.(provider.LoadReport)
 	if pluginErr != nil {
-		log.Errorf("external capability providers disabled: %v", pluginErr)
+		log.Errorf(ctx, "external capability providers disabled: %v", pluginErr)
 	} else {
-		log.Infof("capability provider registry loaded active=%d rejected=%d", len(pluginReport.Loaded), len(pluginReport.Rejected))
+		log.Infof(ctx, "capability provider registry loaded active=%d rejected=%d", len(pluginReport.Loaded), len(pluginReport.Rejected))
 		for identity, reason := range pluginReport.Rejected {
-			log.Warnf("capability provider rejected provider=%s reason=%s", identity, reason)
+			log.Warnf(ctx, "capability provider rejected provider=%s reason=%s", identity, reason)
 		}
 	}
 
@@ -88,7 +95,7 @@ func serve(configPath string, quit <-chan os.Signal) (bool, error) {
 	if cfg.Research.Enabled {
 		cacheDir := cfg.Research.CacheDir
 		if err := researchevidence.ValidateCacheDir(cacheDir); err != nil {
-			log.Warnf("persistent research cache disabled: %v", err)
+			log.Warnf(ctx, "persistent research cache disabled: %v", err)
 			cacheDir = ""
 		}
 		protocol := research.DefaultProtocol()
@@ -107,7 +114,7 @@ func serve(configPath string, quit <-chan os.Signal) (bool, error) {
 				OpenDuration:     time.Duration(cfg.Research.CircuitOpenSec) * time.Second,
 			},
 		})
-		log.Infof("research agent enabled providers=%v cache_dir=%s", cfg.Research.Providers, cacheDir)
+		log.Infof(ctx, "research agent enabled providers=%v cache_dir=%s", cfg.Research.Providers, cacheDir)
 	}
 
 	srvCfg := server.Config{
@@ -125,6 +132,11 @@ func serve(configPath string, quit <-chan os.Signal) (bool, error) {
 			SkillsDir:                cfg.Skills.Dir,
 			SkillsConfigPath:         cfg.Skills.ConfigPath,
 			SkillsGlobalDir:          cfg.Skills.GlobalDir,
+			SemanticIntentMode:       cfg.Intent.Mode,
+			SemanticIntentTimeout:    time.Duration(cfg.Intent.TimeoutMS) * time.Millisecond,
+			SemanticIntentConfidence: cfg.Intent.MinConfidence,
+			SemanticIntentMaxHistory: cfg.Intent.MaxHistory,
+			IntentCatalog:            intentCatalog,
 			ResearchRunner:           researchRunner,
 			DisableResearch:          !cfg.Research.Enabled,
 			ResearchModelPlanning:    cfg.Research.ModelPlanning,
@@ -139,12 +151,12 @@ func serve(configPath string, quit <-chan os.Signal) (bool, error) {
 	if cfg.Memory.Enabled && cfg.DB.Enabled {
 		db, err := database.New(cfg.DB)
 		if err != nil {
-			log.Warnf("memory disabled: database connection failed: %v", err)
+			log.Warnf(ctx, "memory disabled: database connection failed: %v", err)
 		} else {
 			store := memory.NewMemStore(db)
 			if cfg.Memory.AutoMigrate {
 				if err := store.AutoMigrate(); err != nil {
-					log.Errorf("memory auto-migrate failed: %v", err)
+					log.Errorf(ctx, "memory auto-migrate failed: %v", err)
 				}
 			}
 			srvCfg.Store = store
@@ -153,7 +165,7 @@ func serve(configPath string, quit <-chan os.Signal) (bool, error) {
 				Enabled:   cfg.Memory.BackgroundReview,
 				MaxMemory: cfg.Memory.MaxReviewMemory,
 			}, store)
-			log.Infof("memory module enabled (postgres)")
+			log.Infof(ctx, "memory module enabled (postgres)")
 		}
 	}
 
@@ -174,10 +186,10 @@ func serve(configPath string, quit <-chan os.Signal) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("grpc listen %s: %w", cfg.Server.GRPCAddr, err)
 	}
-	log.Go(func() {
-		log.Infof("gRPC server listening on %s", cfg.Server.GRPCAddr)
+	log.Go(ctx, func(serverCtx context.Context) {
+		log.Infof(serverCtx, "gRPC server listening on %s", cfg.Server.GRPCAddr)
 		if err := grpcServer.Serve(lis); err != nil {
-			log.Fatalf("grpc serve: %v", err)
+			log.Fatalf(serverCtx, "grpc serve: %v", err)
 		}
 	})
 
@@ -198,9 +210,9 @@ func serve(configPath string, quit <-chan os.Signal) (bool, error) {
 	admin.NewHandler(configPath, cfg.Skills.ConfigPath, restartCh).WithPluginReload(reloadPlugins).Register(mux)
 
 	httpServer := &http.Server{Addr: cfg.Server.HTTPAddr, Handler: requestLogger(mux), ReadHeaderTimeout: 10 * time.Second}
-	log.Infof("HTTP gateway listening on %s", cfg.Server.HTTPAddr)
+	log.Infof(ctx, "HTTP gateway listening on %s", cfg.Server.HTTPAddr)
 	serverErr := make(chan error, 1)
-	log.Go(func() {
+	log.Go(ctx, func(context.Context) {
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			serverErr <- err
 		}
@@ -216,12 +228,12 @@ func serve(configPath string, quit <-chan os.Signal) (bool, error) {
 		return false, fmt.Errorf("http serve: %w", err)
 	}
 
-	log.Infof("shutting down agent-runtime...")
+	log.Infof(ctx, "shutting down agent-runtime...")
 	gate.Drain()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if err := httpServer.Shutdown(ctx); err != nil {
-		log.Errorf("HTTP graceful shutdown failed: %v", err)
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		log.Errorf(shutdownCtx, "HTTP graceful shutdown failed: %v", err)
 	}
 	grpcStopped := make(chan struct{})
 	go func() {
@@ -230,7 +242,7 @@ func serve(configPath string, quit <-chan os.Signal) (bool, error) {
 	}()
 	select {
 	case <-grpcStopped:
-	case <-ctx.Done():
+	case <-shutdownCtx.Done():
 		grpcServer.Stop()
 	}
 	return restart, nil
@@ -279,7 +291,7 @@ func makeGAReadinessHandler(gate *operations.Gate, cfg readiness.Config) http.Ha
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(readiness.HTTPStatus(report))
 		if err := json.NewEncoder(w).Encode(report); err != nil {
-			log.Errorf("encode GA readiness response: %v", err)
+			log.Errorf(r.Context(), "encode GA readiness response: %v", err)
 		}
 	}
 }
@@ -465,11 +477,11 @@ func serveSSE(w http.ResponseWriter, r *http.Request, run func(send func(*runtim
 		return nil
 	}
 	if err := run(send); err != nil {
-		log.ErrorwCtx(r.Context(), "http stream failed", "method", r.Method, "path", r.URL.EscapedPath(), "error_chain", log.FormatError(err))
+		log.Errorw(r.Context(), "http stream failed", "method", r.Method, "path", r.URL.EscapedPath(), "error_chain", log.FormatError(err))
 		if emittedError {
 			return
 		}
-		traceID, _ := r.Context().Value(log.ReqIDKey).(string)
+		traceID := log.ReqID(r.Context())
 		_, _ = fmt.Fprintf(w, "event: %s\ndata: {\"message\":%q,\"trace_id\":%q}\n\n", constant.EventError, err.Error(), traceID)
 		flusher.Flush()
 	}

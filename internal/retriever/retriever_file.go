@@ -45,7 +45,7 @@ func (fpr *FileParserRetriever) Retrieve(ctx context.Context, query string) ([]*
 		for _, file := range files {
 			doc, err := fpr.parseFile(ctx, file)
 			if err != nil {
-				log.Warnf("[FileParserRetriever] parse file %s failed: %v", file, err)
+				log.Warnf(ctx, "[FileParserRetriever] parse file %s failed: %v", file, err)
 				continue
 			}
 			docs = append(docs, doc)

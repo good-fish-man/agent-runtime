@@ -181,7 +181,7 @@ func ModelName(id string) string {
 // payload that must be dispatched through an OnAction sink, so they can only be
 // fulfilled by the streaming execution path.
 func IsClientBound(id string) bool {
-	return strings.HasPrefix(id, "browser.") || strings.HasPrefix(id, "desktop.")
+	return IsBrowser(id) || IsDesktop(id)
 }
 
 // ClientBoundModelNames returns the model function names of every registered

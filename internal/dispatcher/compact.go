@@ -61,7 +61,7 @@ func (d *Dispatcher) maybeCompact(ctx context.Context, msgs []eino.ChatMessage) 
 	result, err := d.compact.Compact(ctx, ccMsgs)
 	if err != nil || result == nil {
 		if err != nil {
-			log.Warnf("[Dispatcher] compaction failed, using original messages: %v", err)
+			log.Warnf(ctx, "[Dispatcher] compaction failed, using original messages: %v", err)
 		}
 		return msgs
 	}
@@ -69,7 +69,7 @@ func (d *Dispatcher) maybeCompact(ctx context.Context, msgs []eino.ChatMessage) 
 	if len(post) == 0 {
 		return msgs
 	}
-	log.Infof("[Dispatcher] compacted %d messages -> %d (pre=%d post=%d tokens)",
+	log.Infof(ctx, "[Dispatcher] compacted %d messages -> %d (pre=%d post=%d tokens)",
 		len(ccMsgs), len(post), result.PreCompactTokens, result.PostCompactTokens)
 	return ccToChat(post)
 }

@@ -62,7 +62,7 @@ func (d *Dispatcher) dispatchCapabilityHandoff(
 	}
 	source, ok := selectBrowserHandoffSource(evidence.Sources, query)
 	if !ok {
-		log.WarnwCtx(ctx, "browser target handoff returned no safe URL", "query", query, "sources", len(evidence.Sources), "elapsed_ms", time.Since(started).Milliseconds())
+		log.Warnw(ctx, "browser target handoff returned no safe URL", "query", query, "sources", len(evidence.Sources), "elapsed_ms", time.Since(started).Milliseconds())
 		return d.capabilityHandoffFailure(emitChunk, "Search completed, but no safe exact website URL could be verified for the browser task.")
 	}
 	resolvedURL := browserHandoffRootURL(source.URL)
@@ -92,7 +92,7 @@ func (d *Dispatcher) dispatchCapabilityHandoff(
 	if err := emitAction(action); err != nil {
 		return nil, true, log.WrapError(err, "dispatcher.capabilityHandoff.emit")
 	}
-	log.InfowCtx(ctx, "browser capability handoff resumed",
+	log.Infow(ctx, "browser capability handoff resumed",
 		"query", query, "resolved_url", resolvedURL, "source", source.Title,
 		"session_id", action.SessionID, "elapsed_ms", time.Since(started).Milliseconds(),
 	)

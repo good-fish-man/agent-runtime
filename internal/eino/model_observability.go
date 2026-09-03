@@ -47,7 +47,7 @@ func (m *observedChatModel) Generate(ctx context.Context, input []*schema.Messag
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = log.NewError("eino.ChatModel.Generate", "panic: %v", recovered)
-			log.ErrorfCtx(ctx, "model call panic model=%s mode=generate error=%v\n%s", m.name, recovered, debug.Stack())
+			log.Errorf(ctx, "model call panic model=%s mode=generate error=%v\n%s", m.name, recovered, debug.Stack())
 		}
 		recordModelUsage(ctx, m.identity(), usageOf(message))
 		span.End(err, modelMessageFields(message)...)
@@ -74,7 +74,7 @@ func (m *observedChatModel) Stream(ctx context.Context, input []*schema.Message,
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = log.NewError("eino.ChatModel.Stream", "panic: %v", recovered)
-			log.ErrorfCtx(ctx, "model call panic model=%s mode=stream error=%v\n%s", m.name, recovered, debug.Stack())
+			log.Errorf(ctx, "model call panic model=%s mode=stream error=%v\n%s", m.name, recovered, debug.Stack())
 			span.End(err)
 		}
 	}()
@@ -143,14 +143,11 @@ func (m *observedChatModel) forwardStream(
 	writer *schema.StreamWriter[*schema.Message],
 	span *observability.Invocation,
 ) {
-	release := log.BindCtx(ctx)
-	defer release()
-
 	stats := modelStreamObservation{}
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err := log.NewError("eino.ChatModel.Stream.recv", "panic: %v", recovered)
-			log.ErrorfCtx(ctx, "model stream panic model=%s error=%v\n%s", m.name, recovered, debug.Stack())
+			log.Errorf(ctx, "model stream panic model=%s error=%v\n%s", m.name, recovered, debug.Stack())
 			writer.Send(nil, err)
 			span.End(err, stats.fields()...)
 		}

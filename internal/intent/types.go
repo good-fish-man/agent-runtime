@@ -51,11 +51,15 @@ const (
 )
 
 type Request struct {
-	Text                 string
-	HasFiles             bool
-	ActiveBrowserSession bool
-	ActiveDesktopSession bool
-	PreviousUserMessages []string
+	Text                    string
+	HasFiles                bool
+	ActiveBrowserSession    bool
+	ActiveDesktopSession    bool
+	BackgroundMonitor       bool
+	PersistentGoalExecution bool
+	Locale                  string
+	Timezone                string
+	PreviousUserMessages    []string
 }
 
 type Intent struct {
