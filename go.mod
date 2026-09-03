@@ -5,12 +5,13 @@ go 1.25.0
 require (
 	github.com/cloudwego/eino v0.8.6
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.11
-	github.com/good-fish-man/athena-protocol v0.2.0
-	github.com/good-fish-man/logx v0.2.0
+	github.com/eino-contrib/jsonschema v1.0.3
+	github.com/good-fish-man/athena-protocol v1.0.0
+	github.com/good-fish-man/logx v1.0.0
 	github.com/oklog/ulid/v2 v2.1.1
 	golang.org/x/net v0.54.0
 	google.golang.org/grpc v1.82.1
-	google.golang.org/protobuf v1.36.11
+	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.2
@@ -25,7 +26,6 @@ require (
 	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.15 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/eino-contrib/jsonschema v1.0.3 // indirect
 	github.com/evanphx/json-patch v0.5.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/goph/emperror v0.17.2 // indirect
