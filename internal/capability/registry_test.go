@@ -10,6 +10,10 @@ func TestCatalogContainsStablePublicCapabilities(t *testing.T) {
 		if definition, ok := GlobalRegistry.Get(id); !ok || definition.ID != id {
 			t.Fatalf("capability %s is not registered: %+v", id, definition)
 		}
+		definition, _ := GlobalRegistry.Get(id)
+		if len(definition.Preconditions) == 0 || len(definition.Postconditions) == 0 || (!definition.ReadOnly && len(definition.ExpectedEffects) == 0) {
+			t.Fatalf("capability %s has no structured world contract: %+v", id, definition)
+		}
 	}
 }
 

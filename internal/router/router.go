@@ -48,13 +48,13 @@ func RouteIntent(parsed intent.Intent) RoutePlan {
 		add(capability.InternetSearch, capability.InternetFetch)
 	}
 	if parsed.HasSignal(intent.SignalBrowserAuthentication) {
-		add(capability.BrowserSearch, capability.BrowserTask, capability.BrowserNavigate, capability.BrowserLogin, capability.BrowserRead, capability.BrowserObserve, capability.BrowserAction, capability.BrowserWait, capability.BrowserScreenshot, capability.BrowserClose)
+		add(capability.BrowserSearch, capability.BrowserTask, capability.BrowserNavigate, capability.BrowserLogin, capability.BrowserRead, capability.BrowserObserve, capability.BrowserAction, capability.BrowserPointer, capability.BrowserWait, capability.BrowserScreenshot, capability.BrowserClose)
 	}
 	if parsed.HasSignal(intent.SignalBrowserDownload) {
 		add(capability.BrowserTask, capability.BrowserOpen, capability.BrowserObserve, capability.BrowserAction, capability.BrowserDownload)
 	}
 	if parsed.HasSignal(intent.SignalBrowserScreenshot) {
-		add(capability.BrowserObserve, capability.BrowserAction, capability.BrowserScreenshot)
+		add(capability.BrowserObserve, capability.BrowserAction, capability.BrowserPointer, capability.BrowserScreenshot)
 	}
 	if parsed.HasSignal(intent.SignalBrowserClose) {
 		add(capability.BrowserClose)
@@ -100,11 +100,11 @@ func RouteIntent(parsed intent.Intent) RoutePlan {
 }
 
 func addBrowserTaskCapabilities(add func(...string)) {
-	add(capability.BrowserTask, capability.BrowserObserve, capability.BrowserAction, capability.BrowserAutomation, capability.BrowserWait, capability.BrowserScreenshot)
+	add(capability.BrowserTask, capability.BrowserObserve, capability.BrowserAction, capability.BrowserPointer, capability.BrowserAutomation, capability.BrowserWait, capability.BrowserScreenshot)
 }
 
 func addBrowserExecutionCapabilities(add func(...string)) {
-	add(capability.BrowserTask, capability.BrowserOpen, capability.BrowserNavigate, capability.BrowserRead, capability.BrowserObserve, capability.BrowserAction, capability.BrowserAutomation, capability.BrowserWait, capability.BrowserScreenshot)
+	add(capability.BrowserTask, capability.BrowserOpen, capability.BrowserNavigate, capability.BrowserRead, capability.BrowserObserve, capability.BrowserAction, capability.BrowserPointer, capability.BrowserAutomation, capability.BrowserWait, capability.BrowserScreenshot)
 }
 
 func allBrowserCapabilities() []string {

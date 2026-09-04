@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package agent.runtime.v1;
 
-option go_package = "agent-runtime/gen/agent/runtime/v1;runtimev1";
+option go_package = "github.com/good-fish-man/agent-runtime/gen/agent/runtime/v1;runtimev1";
 
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
@@ -347,6 +347,22 @@ message CapabilityDefinition {
   string status = 7;
   string provider = 8;
   string reason = 9;
+  repeated WorldCondition preconditions = 10;
+  repeated WorldEffect expected_effects = 11;
+  repeated WorldCondition postconditions = 12;
+}
+
+message WorldCondition {
+  string path = 1;
+  string operator = 2;
+  bytes value_json = 3;
+  bool required = 4;
+}
+
+message WorldEffect {
+  string operation = 1;
+  string path = 2;
+  bytes value_json = 3;
 }
 
 message ListCapabilitiesResponse {

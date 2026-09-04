@@ -25,6 +25,7 @@ import (
 	"github.com/good-fish-man/agent-runtime/internal/research"
 	"github.com/good-fish-man/agent-runtime/internal/tools"
 	"github.com/good-fish-man/agent-runtime/internal/types"
+	protocol "github.com/good-fish-man/athena-protocol/protocol/v5"
 	log "github.com/good-fish-man/logx"
 
 	"google.golang.org/grpc/codes"
@@ -382,9 +383,27 @@ func (s *Server) ListCapabilities(ctx context.Context, req *runtimev1.ListCapabi
 			Id: definition.ID, Description: definition.Description, Input: definition.Input,
 			Output: definition.Output, ReadOnly: definition.ReadOnly, Risk: definition.Risk,
 			Status: string(definition.Status), Provider: definition.Provider, Reason: definition.Reason,
+			Preconditions: worldConditionsToProto(definition.Preconditions), ExpectedEffects: worldEffectsToProto(definition.ExpectedEffects), Postconditions: worldConditionsToProto(definition.Postconditions),
 		})
 	}
 	return &runtimev1.ListCapabilitiesResponse{Capabilities: items, TraceId: traceID}, nil
+}
+
+func worldConditionsToProto(values []protocol.WorldCondition) []*runtimev1.WorldCondition {
+	result := make([]*runtimev1.WorldCondition, 0, len(values))
+	for _, value := range values {
+		encoded, _ := json.Marshal(value.Value)
+		result = append(result, &runtimev1.WorldCondition{Path: value.Path, Operator: value.Operator, ValueJson: encoded, Required: value.Required})
+	}
+	return result
+}
+func worldEffectsToProto(values []protocol.WorldEffect) []*runtimev1.WorldEffect {
+	result := make([]*runtimev1.WorldEffect, 0, len(values))
+	for _, value := range values {
+		encoded, _ := json.Marshal(value.Value)
+		result = append(result, &runtimev1.WorldEffect{Operation: value.Operation, Path: value.Path, ValueJson: encoded})
+	}
+	return result
 }
 
 // ---- streaming RPCs ----

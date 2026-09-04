@@ -55,7 +55,7 @@ func TestCapabilityNamespaceUsesCompleteFirstSegment(t *testing.T) {
 
 func TestBrowserIDsFollowRegisteredNamespace(t *testing.T) {
 	ids := NewSet(BrowserIDs()...)
-	for _, want := range []string{BrowserTask, BrowserWait, BrowserDownload, BrowserScreenshot, BrowserAutomation} {
+	for _, want := range []string{BrowserTask, BrowserWait, BrowserDownload, BrowserScreenshot, BrowserPointer, BrowserAutomation} {
 		if !ids.Contains(want) {
 			t.Fatalf("BrowserIDs() missing %s: %v", want, ids.IDs())
 		}

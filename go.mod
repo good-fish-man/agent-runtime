@@ -6,7 +6,7 @@ require (
 	github.com/cloudwego/eino v0.8.6
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.11
 	github.com/eino-contrib/jsonschema v1.0.3
-	github.com/good-fish-man/athena-protocol v1.0.0
+	github.com/good-fish-man/athena-protocol v1.1.0
 	github.com/good-fish-man/logx v1.0.0
 	github.com/oklog/ulid/v2 v2.1.1
 	golang.org/x/net v0.54.0

@@ -32,6 +32,7 @@ func ToolsByNamesWithBasePath(basePath string, names []string) []tool.BaseTool {
 		BrowserNavigateToolName:   func() ToolInterface { return NewBrowserNavigateTool() },
 		BrowserObserveToolName:    func() ToolInterface { return NewBrowserObserveTool() },
 		BrowserActionToolName:     func() ToolInterface { return NewBrowserActionTool() },
+		BrowserPointerToolName:    func() ToolInterface { return NewBrowserPointerTool() },
 		BrowserAutomationToolName: func() ToolInterface { return NewBrowserAutomationTool() },
 		BrowserReadToolName:       func() ToolInterface { return NewBrowserReadTool() },
 		BrowserCloseToolName:      func() ToolInterface { return NewBrowserCloseTool() },

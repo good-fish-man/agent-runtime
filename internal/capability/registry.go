@@ -12,6 +12,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	toolimpl "github.com/good-fish-man/agent-runtime/internal/tools"
+	protocol "github.com/good-fish-man/athena-protocol/protocol/v5"
 )
 
 type Status string
@@ -23,19 +24,22 @@ const (
 
 // Definition is a provider-independent capability contract.
 type Definition struct {
-	ID                  string            `json:"id" yaml:"id"`
-	Description         string            `json:"description" yaml:"description"`
-	Input               map[string]string `json:"input,omitempty" yaml:"input,omitempty"`
-	Output              string            `json:"output,omitempty" yaml:"output,omitempty"`
-	ReadOnly            bool              `json:"read_only" yaml:"read_only"`
-	Risk                string            `json:"risk" yaml:"risk"`
-	RiskFloor           string            `json:"risk_floor,omitempty" yaml:"risk_floor,omitempty"`
-	Status              Status            `json:"status" yaml:"status"`
-	Provider            string            `json:"provider,omitempty" yaml:"provider,omitempty"`
-	ProviderVersion     string            `json:"provider_version,omitempty" yaml:"provider_version,omitempty"`
-	Permissions         map[string]any    `json:"permissions,omitempty" yaml:"permissions,omitempty"`
-	ObservationContract string            `json:"observation_contract,omitempty" yaml:"observation_contract,omitempty"`
-	Reason              string            `json:"reason,omitempty" yaml:"reason,omitempty"`
+	ID                  string                    `json:"id" yaml:"id"`
+	Description         string                    `json:"description" yaml:"description"`
+	Input               map[string]string         `json:"input,omitempty" yaml:"input,omitempty"`
+	Output              string                    `json:"output,omitempty" yaml:"output,omitempty"`
+	ReadOnly            bool                      `json:"read_only" yaml:"read_only"`
+	Risk                string                    `json:"risk" yaml:"risk"`
+	RiskFloor           string                    `json:"risk_floor,omitempty" yaml:"risk_floor,omitempty"`
+	Status              Status                    `json:"status" yaml:"status"`
+	Provider            string                    `json:"provider,omitempty" yaml:"provider,omitempty"`
+	ProviderVersion     string                    `json:"provider_version,omitempty" yaml:"provider_version,omitempty"`
+	Permissions         map[string]any            `json:"permissions,omitempty" yaml:"permissions,omitempty"`
+	ObservationContract string                    `json:"observation_contract,omitempty" yaml:"observation_contract,omitempty"`
+	Preconditions       []protocol.WorldCondition `json:"preconditions" yaml:"preconditions"`
+	ExpectedEffects     []protocol.WorldEffect    `json:"expected_effects" yaml:"expected_effects"`
+	Postconditions      []protocol.WorldCondition `json:"postconditions" yaml:"postconditions"`
+	Reason              string                    `json:"reason,omitempty" yaml:"reason,omitempty"`
 }
 
 type Factory func(basePath string) (tool.BaseTool, error)
@@ -79,6 +83,7 @@ func (r *Registry) register(definition Definition, factory Factory, external boo
 	if definition.Risk == "" {
 		definition.Risk = "low"
 	}
+	definition = withWorldContract(definition)
 	if factory == nil {
 		definition.Status = StatusUnavailable
 	} else {
@@ -91,6 +96,19 @@ func (r *Registry) register(definition Definition, factory Factory, external boo
 	}
 	r.entries[definition.ID] = registration{definition: definition, factory: factory, external: external}
 	return nil
+}
+
+func withWorldContract(definition Definition) Definition {
+	if len(definition.Preconditions) == 0 {
+		definition.Preconditions = []protocol.WorldCondition{{Path: "/runtime/capabilities/" + definition.ID, Operator: "available", Required: true}}
+	}
+	if len(definition.ExpectedEffects) == 0 && !definition.ReadOnly {
+		definition.ExpectedEffects = []protocol.WorldEffect{{Operation: "set", Path: "/capability_effects/" + definition.ID}}
+	}
+	if len(definition.Postconditions) == 0 {
+		definition.Postconditions = []protocol.WorldCondition{{Path: "/observations/latest/status", Operator: "in", Value: []string{"SUCCEEDED", "FAILED", "BLOCKED"}, Required: true}}
+	}
+	return definition
 }
 
 // RemoveExternal drops only dynamically loaded provider registrations. It is

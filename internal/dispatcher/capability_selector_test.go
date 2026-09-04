@@ -301,7 +301,7 @@ func TestBrowserExtendedIntentsSelectRuntimeCapabilities(t *testing.T) {
 		}
 	}
 	screenshotSelected := selectBuiltinCapabilities("给当前网页截一张图", false)
-	for _, want := range []string{capability.BrowserObserve, capability.BrowserAction, capability.BrowserScreenshot} {
+	for _, want := range []string{capability.BrowserObserve, capability.BrowserAction, capability.BrowserPointer, capability.BrowserScreenshot} {
 		if !contains(screenshotSelected, want) {
 			t.Fatalf("screenshot browser capabilities %v missing %s", screenshotSelected, want)
 		}

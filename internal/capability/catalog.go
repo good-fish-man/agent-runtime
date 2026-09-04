@@ -25,6 +25,7 @@ const (
 	BrowserWait        = "browser.wait"
 	BrowserDownload    = "browser.download"
 	BrowserScreenshot  = "browser.screenshot"
+	BrowserPointer     = "browser.pointer"
 	BrowserAutomation  = "browser.automation"
 	BrowserClose       = "browser.close"
 	DesktopAction      = "desktop.action"
@@ -66,6 +67,11 @@ func init() {
 		{Definition{ID: BrowserAction, Description: "Perform a reversible browser navigation action", Input: map[string]string{"session_id": "string", "action": "string"}, Output: "BrowserSnapshot", Risk: "medium"}, "BrowserAction"},
 		{Definition{ID: BrowserWait, Description: "Wait briefly for the current browser session to settle", Input: map[string]string{"session_id": "string", "milliseconds": "integer"}, Output: "BrowserObservation", ReadOnly: true}, "BrowserAction"},
 		{Definition{ID: BrowserScreenshot, Description: "Capture a screenshot of the current browser page", Input: map[string]string{"session_id": "string"}, Output: "BrowserScreenshot", ReadOnly: true}, "BrowserAction"},
+		{Definition{ID: BrowserPointer, Description: "Control a visual-only page surface using a short-lived screenshot grounding", Input: map[string]string{
+			"session_id": "string", "operation": "move|click|drag", "grounding_id": "string", "screenshot_id": "string",
+			"page_revision": "string", "coordinate_space": "normalized_1000|screenshot_pixels", "x": "number", "y": "number",
+			"target_x": "number?", "target_y": "number?", "purpose": "string",
+		}, Output: "BrowserObservation", Risk: "medium"}, "BrowserPointer"},
 		{Definition{ID: BrowserDownload, Description: "Download a user-requested file by clicking a semantic browser ref", Input: map[string]string{"session_id": "string", "ref": "string", "filename": "string"}, Output: "BrowserDownload", Risk: "medium"}, "BrowserAction"},
 		{Definition{ID: BrowserAutomation, Description: "Manage safe event-driven browser watch rules", Input: map[string]string{"operation": "string", "session_id": "string"}, Output: "BrowserAutomationRule", Risk: "medium"}, "BrowserAutomation"},
 		{Definition{ID: BrowserClose, Description: "Close a browser session", Input: map[string]string{"session_id": "string"}, Output: "CloseResult", Risk: "medium"}, "BrowserClose"},

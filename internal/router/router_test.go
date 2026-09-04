@@ -12,7 +12,7 @@ func TestRouteDirectBrowserInteraction(t *testing.T) {
 	if plan.Primary != RouteBrowser || plan.Reason != "direct_browser_interaction" {
 		t.Fatalf("unexpected route: %+v", plan)
 	}
-	for _, wanted := range []string{capability.BrowserTask, capability.BrowserObserve, capability.BrowserAction} {
+	for _, wanted := range []string{capability.BrowserTask, capability.BrowserObserve, capability.BrowserAction, capability.BrowserPointer} {
 		if !plan.UsesCapability(wanted) {
 			t.Fatalf("route missing %s: %+v", wanted, plan)
 		}
