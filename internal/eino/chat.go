@@ -189,10 +189,37 @@ func NewClient(ctx context.Context, cfg ModelConfig) (*Client, error) {
 	if err := prepareLocalModelRuntime(ctx, &cfg); err != nil {
 		return nil, log.WrapError(err, "eino.NewClient.prepareLocalModelRuntime")
 	}
+	oc, err := openAIChatModelConfig(cfg)
+	if err != nil {
+		return nil, log.WrapError(err, "eino.NewClient.modelConfig")
+	}
+	cm, err := openai.NewChatModel(ctx, oc)
+	if err != nil {
+		return nil, log.WrapError(err, "eino.NewClient.createChatModel")
+	}
+	return &Client{model: newObservedChatModel(cm, modelIdentityFromConfig(cfg)), name: cfg.Name}, nil
+}
+
+func openAIChatModelConfig(cfg ModelConfig) (*openai.ChatModelConfig, error) {
 	oc := &openai.ChatModelConfig{
 		APIKey:  ExpandEnv(cfg.APIKey),
 		Model:   cfg.Name,
 		BaseURL: ExpandEnv(cfg.APIBase),
+	}
+	if isGPT56Model(cfg.Name) {
+		effort, err := configuredReasoningEffort(cfg.ExtraFields)
+		if err != nil {
+			return nil, err
+		}
+		if effort == "" {
+			effort = "medium"
+		}
+		oc.ReasoningEffort = openai.ReasoningEffortLevel(effort)
+		if cfg.MaxTokens > 0 {
+			mt := cfg.MaxTokens
+			oc.MaxCompletionTokens = &mt
+		}
+		return oc, nil
 	}
 	if cfg.Temperature > 0 {
 		t := float32(cfg.Temperature)
@@ -206,11 +233,33 @@ func NewClient(ctx context.Context, cfg ModelConfig) (*Client, error) {
 		p := float32(cfg.TopP)
 		oc.TopP = &p
 	}
-	cm, err := openai.NewChatModel(ctx, oc)
-	if err != nil {
-		return nil, log.WrapError(err, "eino.NewClient.createChatModel")
+	return oc, nil
+}
+
+func isGPT56Model(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	return name == "gpt-5.6" || strings.HasPrefix(name, "gpt-5.6-")
+}
+
+func configuredReasoningEffort(extraFields map[string]any) (string, error) {
+	if len(extraFields) == 0 {
+		return "", nil
 	}
-	return &Client{model: newObservedChatModel(cm, modelIdentityFromConfig(cfg)), name: cfg.Name}, nil
+	value, ok := extraFields["reasoning_effort"]
+	if !ok || value == nil {
+		return "", nil
+	}
+	effort, ok := value.(string)
+	if !ok {
+		return "", fmt.Errorf("reasoning_effort must be a string")
+	}
+	effort = strings.ToLower(strings.TrimSpace(effort))
+	switch effort {
+	case "none", "low", "medium", "high", "xhigh", "max":
+		return effort, nil
+	default:
+		return "", fmt.Errorf("unsupported reasoning_effort %q", effort)
+	}
 }
 
 // Name returns the model name.

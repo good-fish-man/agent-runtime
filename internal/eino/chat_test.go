@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -266,6 +268,101 @@ func TestConsumeStreamingMessageAggregatesToolCalls(t *testing.T) {
 
 func nilContext() context.Context {
 	return context.Background()
+}
+
+func TestOpenAIChatModelConfigGPT56Compatibility(t *testing.T) {
+	configured, err := openAIChatModelConfig(ModelConfig{
+		Name: "gpt-5.6", Temperature: 0.7, MaxTokens: 4096, TopP: 0.8,
+		ExtraFields: map[string]any{"reasoning_effort": "xhigh"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configured.MaxTokens != nil || configured.MaxCompletionTokens == nil || *configured.MaxCompletionTokens != 4096 {
+		t.Fatalf("token fields = max_tokens:%v max_completion_tokens:%v", configured.MaxTokens, configured.MaxCompletionTokens)
+	}
+	if configured.Temperature != nil || configured.TopP != nil {
+		t.Fatalf("GPT-5.6 sampling fields must be omitted: temperature=%v top_p=%v", configured.Temperature, configured.TopP)
+	}
+	if got := string(configured.ReasoningEffort); got != "xhigh" {
+		t.Fatalf("reasoning effort = %q", got)
+	}
+}
+
+func TestOpenAIChatModelConfigGPT56DefaultsReasoning(t *testing.T) {
+	configured, err := openAIChatModelConfig(ModelConfig{Name: "gpt-5.6-sol"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(configured.ReasoningEffort); got != "medium" {
+		t.Fatalf("reasoning effort = %q, want medium", got)
+	}
+}
+
+func TestOpenAIChatModelConfigKeepsLegacyModelParameters(t *testing.T) {
+	configured, err := openAIChatModelConfig(ModelConfig{
+		Name: "gpt-4o", Temperature: 0.7, MaxTokens: 2048, TopP: 0.8,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configured.MaxTokens == nil || *configured.MaxTokens != 2048 || configured.MaxCompletionTokens != nil {
+		t.Fatalf("token fields = max_tokens:%v max_completion_tokens:%v", configured.MaxTokens, configured.MaxCompletionTokens)
+	}
+	if configured.Temperature == nil || configured.TopP == nil {
+		t.Fatalf("legacy sampling fields were not preserved: temperature=%v top_p=%v", configured.Temperature, configured.TopP)
+	}
+}
+
+func TestOpenAIChatModelConfigRejectsInvalidGPT56ReasoningEffort(t *testing.T) {
+	_, err := openAIChatModelConfig(ModelConfig{
+		Name: "gpt-5.6-terra", ExtraFields: map[string]any{"reasoning_effort": "ultra"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unsupported reasoning_effort") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestGPT56ChatCompletionRequestContract(t *testing.T) {
+	var requestBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/chat/completions" {
+			t.Errorf("request path = %q", request.URL.Path)
+		}
+		if err := json.NewDecoder(request.Body).Decode(&requestBody); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"id":"chatcmpl-test","object":"chat.completion","created":1,"model":"gpt-5.6","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(context.Background(), ModelConfig{
+		Name: "gpt-5.6", APIKey: "test-key", APIBase: server.URL + "/v1",
+		Temperature: 0.7, MaxTokens: 4096, TopP: 0.8,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := client.Model().Generate(context.Background(), []*schema.Message{schema.UserMessage("hello")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.Content != "ok" {
+		t.Fatalf("response content = %q", message.Content)
+	}
+	if requestBody["model"] != "gpt-5.6" || requestBody["reasoning_effort"] != "medium" || requestBody["max_completion_tokens"] != float64(4096) {
+		t.Fatalf("request body = %+v", requestBody)
+	}
+	if _, ok := requestBody["max_tokens"]; ok {
+		t.Fatalf("legacy max_tokens reached GPT-5.6 request: %+v", requestBody)
+	}
+	if _, ok := requestBody["temperature"]; ok {
+		t.Fatalf("temperature reached GPT-5.6 request: %+v", requestBody)
+	}
+	if _, ok := requestBody["top_p"]; ok {
+		t.Fatalf("top_p reached GPT-5.6 request: %+v", requestBody)
+	}
 }
 
 func TestMergeResultAccumulatesModelUsageAcrossToolIterations(t *testing.T) {
