@@ -3,9 +3,7 @@ package eino
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -273,31 +271,41 @@ func nilContext() context.Context {
 	return context.Background()
 }
 
-func TestOpenAIChatModelConfigGPT56Compatibility(t *testing.T) {
-	configured, err := openAIChatModelConfig(ModelConfig{
+func TestOpenAIResponsesModelConfigGPT56Compatibility(t *testing.T) {
+	configured, err := openAIResponsesModelConfig(ModelConfig{
 		Name: "gpt-5.6", Temperature: 0.7, MaxTokens: 4096, TopP: 0.8,
 		ExtraFields: map[string]any{"reasoning_effort": "xhigh"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if configured.MaxTokens != nil || configured.MaxCompletionTokens == nil || *configured.MaxCompletionTokens != 4096 {
-		t.Fatalf("token fields = max_tokens:%v max_completion_tokens:%v", configured.MaxTokens, configured.MaxCompletionTokens)
+	if configured.MaxTokens == nil || *configured.MaxTokens != 4096 {
+		t.Fatalf("max output tokens = %v", configured.MaxTokens)
 	}
 	if configured.Temperature != nil || configured.TopP != nil {
 		t.Fatalf("GPT-5.6 sampling fields must be omitted: temperature=%v top_p=%v", configured.Temperature, configured.TopP)
 	}
-	if got := string(configured.ReasoningEffort); got != "xhigh" {
+	if configured.Reasoning == nil || string(configured.Reasoning.Effort) != "xhigh" {
+		got := ""
+		if configured.Reasoning != nil {
+			got = string(configured.Reasoning.Effort)
+		}
 		t.Fatalf("reasoning effort = %q", got)
+	}
+	if configured.Store == nil || *configured.Store {
+		t.Fatalf("responses must be stateless: store=%v", configured.Store)
+	}
+	if len(configured.Include) != 1 || string(configured.Include[0]) != "reasoning.encrypted_content" {
+		t.Fatalf("responses include = %v", configured.Include)
 	}
 }
 
-func TestOpenAIChatModelConfigGPT56DefaultsReasoning(t *testing.T) {
-	configured, err := openAIChatModelConfig(ModelConfig{Name: "gpt-5.6-sol"})
+func TestOpenAIResponsesModelConfigGPT56DefaultsReasoning(t *testing.T) {
+	configured, err := openAIResponsesModelConfig(ModelConfig{Name: "gpt-5.6-sol"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(configured.ReasoningEffort); got != "medium" {
+	if got := string(configured.Reasoning.Effort); got != "medium" {
 		t.Fatalf("reasoning effort = %q, want medium", got)
 	}
 }
@@ -318,7 +326,7 @@ func TestOpenAIChatModelConfigKeepsLegacyModelParameters(t *testing.T) {
 }
 
 func TestOpenAIChatModelConfigRejectsInvalidGPT56ReasoningEffort(t *testing.T) {
-	_, err := openAIChatModelConfig(ModelConfig{
+	_, err := openAIResponsesModelConfig(ModelConfig{
 		Name: "gpt-5.6-terra", ExtraFields: map[string]any{"reasoning_effort": "ultra"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "unsupported reasoning_effort") {
@@ -326,17 +334,17 @@ func TestOpenAIChatModelConfigRejectsInvalidGPT56ReasoningEffort(t *testing.T) {
 	}
 }
 
-func TestGPT56ChatCompletionRequestContract(t *testing.T) {
+func TestGPT56ResponsesRequestContract(t *testing.T) {
 	var requestBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/v1/chat/completions" {
+		if request.URL.Path != "/v1/responses" {
 			t.Errorf("request path = %q", request.URL.Path)
 		}
 		if err := json.NewDecoder(request.Body).Decode(&requestBody); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
 		writer.Header().Set("Content-Type", "application/json")
-		_, _ = writer.Write([]byte(`{"id":"chatcmpl-test","object":"chat.completion","created":1,"model":"gpt-5.6","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+		_, _ = writer.Write([]byte(`{"id":"resp-test","object":"response","created_at":1,"status":"completed","model":"gpt-5.6","output":[{"id":"msg-test","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"reasoning":{"effort":"medium"},"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
 	}))
 	defer server.Close()
 
@@ -347,30 +355,91 @@ func TestGPT56ChatCompletionRequestContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	message, err := client.Model().Generate(context.Background(), []*schema.Message{schema.UserMessage("hello")})
+	toolInfos := []*schema.ToolInfo{{
+		Name: "lookup", Desc: "Look up a value",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"query": {Type: schema.String, Required: true},
+		}),
+	}}
+	message, err := client.Model().Generate(context.Background(), []*schema.Message{schema.UserMessage("hello")}, model.WithTools(toolInfos))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if message.Content != "ok" {
 		t.Fatalf("response content = %q", message.Content)
 	}
-	if requestBody["model"] != "gpt-5.6" || requestBody["reasoning_effort"] != "medium" || requestBody["max_completion_tokens"] != float64(4096) {
+	reasoning, _ := requestBody["reasoning"].(map[string]any)
+	if requestBody["model"] != "gpt-5.6" || reasoning["effort"] != "medium" || requestBody["max_output_tokens"] != float64(4096) {
 		t.Fatalf("request body = %+v", requestBody)
 	}
-	if _, ok := requestBody["max_tokens"]; ok {
-		t.Fatalf("legacy max_tokens reached GPT-5.6 request: %+v", requestBody)
+	if requestBody["store"] != false {
+		t.Fatalf("responses request must disable storage: %+v", requestBody)
 	}
-	if _, ok := requestBody["temperature"]; ok {
-		t.Fatalf("temperature reached GPT-5.6 request: %+v", requestBody)
+	include, _ := requestBody["include"].([]any)
+	if len(include) != 1 || include[0] != "reasoning.encrypted_content" {
+		t.Fatalf("responses include = %#v", requestBody["include"])
 	}
-	if _, ok := requestBody["top_p"]; ok {
-		t.Fatalf("top_p reached GPT-5.6 request: %+v", requestBody)
+	if tools, ok := requestBody["tools"].([]any); !ok || len(tools) != 1 {
+		t.Fatalf("responses tools = %#v", requestBody["tools"])
 	}
 }
 
-func TestGPT56ChatCompletionFunctionToolsDisableReasoning(t *testing.T) {
-	requests := make(chan map[string]any, 3)
+func TestGPT56ResponsesStreamRequestContract(t *testing.T) {
+	var requestBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/responses" {
+			t.Errorf("request path = %q", request.URL.Path)
+		}
+		if err := json.NewDecoder(request.Body).Decode(&requestBody); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		writer.Header().Set("Content-Type", "text/event-stream")
+		response := `{"id":"resp-stream","object":"response","created_at":1,"status":"completed","model":"gpt-5.6","output":[{"id":"msg-stream","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"reasoning":{"effort":"high"},"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`
+		_, _ = fmt.Fprintf(writer, "event: response.created\ndata: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":%s}\n\n", response)
+		_, _ = fmt.Fprint(writer, "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"sequence_number\":1,\"output_index\":0,\"item\":{\"id\":\"msg-stream\",\"type\":\"message\",\"status\":\"in_progress\",\"role\":\"assistant\",\"content\":[]}}\n\n")
+		_, _ = fmt.Fprint(writer, "event: response.content_part.added\ndata: {\"type\":\"response.content_part.added\",\"sequence_number\":2,\"item_id\":\"msg-stream\",\"output_index\":0,\"content_index\":0,\"part\":{\"type\":\"output_text\",\"text\":\"\",\"annotations\":[]}}\n\n")
+		_, _ = fmt.Fprint(writer, "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":3,\"item_id\":\"msg-stream\",\"output_index\":0,\"content_index\":0,\"delta\":\"ok\"}\n\n")
+		_, _ = fmt.Fprint(writer, "event: response.output_text.done\ndata: {\"type\":\"response.output_text.done\",\"sequence_number\":4,\"item_id\":\"msg-stream\",\"output_index\":0,\"content_index\":0,\"text\":\"ok\"}\n\n")
+		_, _ = fmt.Fprint(writer, "event: response.content_part.done\ndata: {\"type\":\"response.content_part.done\",\"sequence_number\":5,\"item_id\":\"msg-stream\",\"output_index\":0,\"content_index\":0,\"part\":{\"type\":\"output_text\",\"text\":\"ok\",\"annotations\":[]}}\n\n")
+		_, _ = fmt.Fprint(writer, "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"sequence_number\":6,\"output_index\":0,\"item\":{\"id\":\"msg-stream\",\"type\":\"message\",\"status\":\"completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\",\"annotations\":[]}]}}\n\n")
+		_, _ = fmt.Fprintf(writer, "event: response.completed\ndata: {\"type\":\"response.completed\",\"sequence_number\":7,\"response\":%s}\n\n", response)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(context.Background(), ModelConfig{
+		Name: "gpt-5.6", APIKey: "test-key", APIBase: server.URL + "/v1",
+		ExtraFields: map[string]any{"reasoning_effort": "high"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := client.Model().Stream(context.Background(), []*schema.Message{schema.UserMessage("hello")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := schema.ConcatMessageStream(stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.Content != "ok" {
+		t.Fatalf("stream content = %q", message.Content)
+	}
+	if requestBody["stream"] != true {
+		t.Fatalf("stream request body = %+v", requestBody)
+	}
+	reasoning, _ := requestBody["reasoning"].(map[string]any)
+	if reasoning["effort"] != "high" {
+		t.Fatalf("stream reasoning = %#v", requestBody["reasoning"])
+	}
+}
+
+func TestGPT56ResponsesWithToolsPreservesReasoning(t *testing.T) {
+	requests := make(chan map[string]any, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/responses" {
+			t.Errorf("request path = %q", request.URL.Path)
+		}
 		var requestBody map[string]any
 		if err := json.NewDecoder(request.Body).Decode(&requestBody); err != nil {
 			t.Errorf("decode request: %v", err)
@@ -378,14 +447,7 @@ func TestGPT56ChatCompletionFunctionToolsDisableReasoning(t *testing.T) {
 		}
 		requests <- requestBody
 		writer.Header().Set("Content-Type", "application/json")
-		if streaming, _ := requestBody["stream"].(bool); streaming {
-			writer.Header().Set("Content-Type", "text/event-stream")
-			_, _ = fmt.Fprint(writer, "data: {\"id\":\"chatcmpl-stream\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-5.6\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":null}]}\n\n")
-			_, _ = fmt.Fprint(writer, "data: {\"id\":\"chatcmpl-stream\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-5.6\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
-			_, _ = fmt.Fprint(writer, "data: [DONE]\n\n")
-			return
-		}
-		_, _ = writer.Write([]byte(`{"id":"chatcmpl-test","object":"chat.completion","created":1,"model":"gpt-5.6","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+		_, _ = writer.Write([]byte(`{"id":"resp-test","object":"response","created_at":1,"status":"completed","model":"gpt-5.6","output":[{"id":"msg-test","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"reasoning":{"effort":"xhigh"},"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
 	}))
 	defer server.Close()
 
@@ -408,20 +470,6 @@ func TestGPT56ChatCompletionFunctionToolsDisableReasoning(t *testing.T) {
 	if _, err := client.Model().Generate(context.Background(), messages, model.WithTools(toolInfos)); err != nil {
 		t.Fatal(err)
 	}
-	stream, err := client.Model().Stream(context.Background(), messages, model.WithTools(toolInfos))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for {
-		_, recvErr := stream.Recv()
-		if errors.Is(recvErr, io.EOF) {
-			break
-		}
-		if recvErr != nil {
-			t.Fatal(recvErr)
-		}
-	}
-	stream.Close()
 
 	bound, err := client.Model().WithTools(toolInfos)
 	if err != nil {
@@ -431,16 +479,17 @@ func TestGPT56ChatCompletionFunctionToolsDisableReasoning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for requestNumber := 1; requestNumber <= 3; requestNumber++ {
+	for requestNumber := 1; requestNumber <= 2; requestNumber++ {
 		requestBody := <-requests
-		if requestBody["reasoning_effort"] != "none" {
-			t.Fatalf("request %d reasoning_effort = %v, body = %+v", requestNumber, requestBody["reasoning_effort"], requestBody)
+		reasoning, _ := requestBody["reasoning"].(map[string]any)
+		if reasoning["effort"] != "xhigh" {
+			t.Fatalf("request %d reasoning = %v, body = %+v", requestNumber, requestBody["reasoning"], requestBody)
 		}
 		if tools, ok := requestBody["tools"].([]any); !ok || len(tools) != 1 {
 			t.Fatalf("request %d tools = %#v", requestNumber, requestBody["tools"])
 		}
-		if requestBody["max_completion_tokens"] != float64(4096) {
-			t.Fatalf("request %d max_completion_tokens = %v", requestNumber, requestBody["max_completion_tokens"])
+		if requestBody["max_output_tokens"] != float64(4096) {
+			t.Fatalf("request %d max_output_tokens = %v", requestNumber, requestBody["max_output_tokens"])
 		}
 	}
 }

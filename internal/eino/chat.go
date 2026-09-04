@@ -22,12 +22,14 @@ import (
 	"github.com/good-fish-man/athena-protocol/sdk/safety"
 	log "github.com/good-fish-man/logx"
 
+	"github.com/cloudwego/eino-ext/components/model/agenticopenai"
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
+	"github.com/openai/openai-go/v3/responses"
 )
 
 // ModelConfig is the subset of model settings the runtime needs to build a chat model.
@@ -189,61 +191,29 @@ func NewClient(ctx context.Context, cfg ModelConfig) (*Client, error) {
 	if err := prepareLocalModelRuntime(ctx, &cfg); err != nil {
 		return nil, log.WrapError(err, "eino.NewClient.prepareLocalModelRuntime")
 	}
-	oc, err := openAIChatModelConfig(cfg)
-	if err != nil {
-		return nil, log.WrapError(err, "eino.NewClient.modelConfig")
-	}
-	cm, err := openai.NewChatModel(ctx, oc)
-	if err != nil {
-		return nil, log.WrapError(err, "eino.NewClient.createChatModel")
-	}
-	var runtimeModel model.ToolCallingChatModel = cm
-	if isGPT56Model(cfg.Name) && string(oc.ReasoningEffort) != "none" {
-		toolConfig := *oc
-		toolConfig.ReasoningEffort = openai.ReasoningEffortLevel("none")
-		toolModel, toolErr := openai.NewChatModel(ctx, &toolConfig)
-		if toolErr != nil {
-			return nil, log.WrapError(toolErr, "eino.NewClient.createGPT56ToolModel")
+	var runtimeModel model.ToolCallingChatModel
+	if isGPT56Model(cfg.Name) {
+		rc, err := openAIResponsesModelConfig(cfg)
+		if err != nil {
+			return nil, log.WrapError(err, "eino.NewClient.responsesModelConfig")
 		}
-		runtimeModel = &gpt56ChatCompletionsModel{
-			direct: cm,
-			tools:  toolModel,
+		responsesModel, err := agenticopenai.NewResponsesModel(ctx, rc)
+		if err != nil {
+			return nil, log.WrapError(err, "eino.NewClient.createResponsesModel")
 		}
+		runtimeModel = newAgenticChatModelAdapter(responsesModel)
+	} else {
+		oc, err := openAIChatModelConfig(cfg)
+		if err != nil {
+			return nil, log.WrapError(err, "eino.NewClient.modelConfig")
+		}
+		cm, err := openai.NewChatModel(ctx, oc)
+		if err != nil {
+			return nil, log.WrapError(err, "eino.NewClient.createChatModel")
+		}
+		runtimeModel = cm
 	}
 	return &Client{model: newObservedChatModel(runtimeModel, modelIdentityFromConfig(cfg)), name: cfg.Name}, nil
-}
-
-// gpt56ChatCompletionsModel preserves the configured reasoning effort for
-// direct requests while using the Chat Completions-compatible value for calls
-// that expose function tools.
-type gpt56ChatCompletionsModel struct {
-	direct model.ToolCallingChatModel
-	tools  model.ToolCallingChatModel
-}
-
-func (m *gpt56ChatCompletionsModel) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
-	if hasFunctionTools(opts...) {
-		return m.tools.Generate(ctx, input, opts...)
-	}
-	return m.direct.Generate(ctx, input, opts...)
-}
-
-func (m *gpt56ChatCompletionsModel) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
-	if hasFunctionTools(opts...) {
-		return m.tools.Stream(ctx, input, opts...)
-	}
-	return m.direct.Stream(ctx, input, opts...)
-}
-
-func (m *gpt56ChatCompletionsModel) WithTools(toolInfos []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
-	if len(toolInfos) == 0 {
-		return m.direct.WithTools(toolInfos)
-	}
-	return m.tools.WithTools(toolInfos)
-}
-
-func hasFunctionTools(opts ...model.Option) bool {
-	return len(model.GetCommonOptions(nil, opts...).Tools) > 0
 }
 
 func openAIChatModelConfig(cfg ModelConfig) (*openai.ChatModelConfig, error) {
@@ -251,21 +221,6 @@ func openAIChatModelConfig(cfg ModelConfig) (*openai.ChatModelConfig, error) {
 		APIKey:  ExpandEnv(cfg.APIKey),
 		Model:   cfg.Name,
 		BaseURL: ExpandEnv(cfg.APIBase),
-	}
-	if isGPT56Model(cfg.Name) {
-		effort, err := configuredReasoningEffort(cfg.ExtraFields)
-		if err != nil {
-			return nil, err
-		}
-		if effort == "" {
-			effort = "medium"
-		}
-		oc.ReasoningEffort = openai.ReasoningEffortLevel(effort)
-		if cfg.MaxTokens > 0 {
-			mt := cfg.MaxTokens
-			oc.MaxCompletionTokens = &mt
-		}
-		return oc, nil
 	}
 	if cfg.Temperature > 0 {
 		t := float32(cfg.Temperature)
@@ -280,6 +235,34 @@ func openAIChatModelConfig(cfg ModelConfig) (*openai.ChatModelConfig, error) {
 		oc.TopP = &p
 	}
 	return oc, nil
+}
+
+func openAIResponsesModelConfig(cfg ModelConfig) (*agenticopenai.ResponsesConfig, error) {
+	effort, err := configuredReasoningEffort(cfg.ExtraFields)
+	if err != nil {
+		return nil, err
+	}
+	if effort == "" {
+		effort = "medium"
+	}
+	store := false
+	rc := &agenticopenai.ResponsesConfig{
+		APIKey:  ExpandEnv(cfg.APIKey),
+		Model:   cfg.Name,
+		BaseURL: ExpandEnv(cfg.APIBase),
+		Reasoning: &responses.ReasoningParam{
+			Effort: responses.ReasoningEffort(effort),
+		},
+		Store: &store,
+		Include: []responses.ResponseIncludable{
+			responses.ResponseIncludableReasoningEncryptedContent,
+		},
+	}
+	if cfg.MaxTokens > 0 {
+		maxTokens := cfg.MaxTokens
+		rc.MaxTokens = &maxTokens
+	}
+	return rc, nil
 }
 
 func isGPT56Model(name string) bool {
@@ -301,7 +284,7 @@ func configuredReasoningEffort(extraFields map[string]any) (string, error) {
 	}
 	effort = strings.ToLower(strings.TrimSpace(effort))
 	switch effort {
-	case "none", "low", "medium", "high", "xhigh", "max":
+	case "none", "minimal", "low", "medium", "high", "xhigh", "max":
 		return effort, nil
 	default:
 		return "", fmt.Errorf("unsupported reasoning_effort %q", effort)
