@@ -197,7 +197,53 @@ func NewClient(ctx context.Context, cfg ModelConfig) (*Client, error) {
 	if err != nil {
 		return nil, log.WrapError(err, "eino.NewClient.createChatModel")
 	}
-	return &Client{model: newObservedChatModel(cm, modelIdentityFromConfig(cfg)), name: cfg.Name}, nil
+	var runtimeModel model.ToolCallingChatModel = cm
+	if isGPT56Model(cfg.Name) && string(oc.ReasoningEffort) != "none" {
+		toolConfig := *oc
+		toolConfig.ReasoningEffort = openai.ReasoningEffortLevel("none")
+		toolModel, toolErr := openai.NewChatModel(ctx, &toolConfig)
+		if toolErr != nil {
+			return nil, log.WrapError(toolErr, "eino.NewClient.createGPT56ToolModel")
+		}
+		runtimeModel = &gpt56ChatCompletionsModel{
+			direct: cm,
+			tools:  toolModel,
+		}
+	}
+	return &Client{model: newObservedChatModel(runtimeModel, modelIdentityFromConfig(cfg)), name: cfg.Name}, nil
+}
+
+// gpt56ChatCompletionsModel preserves the configured reasoning effort for
+// direct requests while using the Chat Completions-compatible value for calls
+// that expose function tools.
+type gpt56ChatCompletionsModel struct {
+	direct model.ToolCallingChatModel
+	tools  model.ToolCallingChatModel
+}
+
+func (m *gpt56ChatCompletionsModel) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
+	if hasFunctionTools(opts...) {
+		return m.tools.Generate(ctx, input, opts...)
+	}
+	return m.direct.Generate(ctx, input, opts...)
+}
+
+func (m *gpt56ChatCompletionsModel) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	if hasFunctionTools(opts...) {
+		return m.tools.Stream(ctx, input, opts...)
+	}
+	return m.direct.Stream(ctx, input, opts...)
+}
+
+func (m *gpt56ChatCompletionsModel) WithTools(toolInfos []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	if len(toolInfos) == 0 {
+		return m.direct.WithTools(toolInfos)
+	}
+	return m.tools.WithTools(toolInfos)
+}
+
+func hasFunctionTools(opts ...model.Option) bool {
+	return len(model.GetCommonOptions(nil, opts...).Tools) > 0
 }
 
 func openAIChatModelConfig(cfg ModelConfig) (*openai.ChatModelConfig, error) {

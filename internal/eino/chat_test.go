@@ -3,7 +3,9 @@ package eino
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,6 +17,7 @@ import (
 	"github.com/good-fish-man/agent-runtime/internal/tools"
 	"github.com/good-fish-man/athena-protocol/sdk/safety"
 
+	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 )
@@ -362,6 +365,83 @@ func TestGPT56ChatCompletionRequestContract(t *testing.T) {
 	}
 	if _, ok := requestBody["top_p"]; ok {
 		t.Fatalf("top_p reached GPT-5.6 request: %+v", requestBody)
+	}
+}
+
+func TestGPT56ChatCompletionFunctionToolsDisableReasoning(t *testing.T) {
+	requests := make(chan map[string]any, 3)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var requestBody map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&requestBody); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		requests <- requestBody
+		writer.Header().Set("Content-Type", "application/json")
+		if streaming, _ := requestBody["stream"].(bool); streaming {
+			writer.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprint(writer, "data: {\"id\":\"chatcmpl-stream\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-5.6\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":null}]}\n\n")
+			_, _ = fmt.Fprint(writer, "data: {\"id\":\"chatcmpl-stream\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-5.6\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
+			_, _ = fmt.Fprint(writer, "data: [DONE]\n\n")
+			return
+		}
+		_, _ = writer.Write([]byte(`{"id":"chatcmpl-test","object":"chat.completion","created":1,"model":"gpt-5.6","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(context.Background(), ModelConfig{
+		Name: "gpt-5.6", APIKey: "test-key", APIBase: server.URL + "/v1",
+		MaxTokens: 4096, ExtraFields: map[string]any{"reasoning_effort": "xhigh"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	toolInfos := []*schema.ToolInfo{{
+		Name: "lookup",
+		Desc: "Look up a value",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"query": {Type: schema.String, Required: true},
+		}),
+	}}
+	messages := []*schema.Message{schema.UserMessage("hello")}
+
+	if _, err := client.Model().Generate(context.Background(), messages, model.WithTools(toolInfos)); err != nil {
+		t.Fatal(err)
+	}
+	stream, err := client.Model().Stream(context.Background(), messages, model.WithTools(toolInfos))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		_, recvErr := stream.Recv()
+		if errors.Is(recvErr, io.EOF) {
+			break
+		}
+		if recvErr != nil {
+			t.Fatal(recvErr)
+		}
+	}
+	stream.Close()
+
+	bound, err := client.Model().WithTools(toolInfos)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bound.Generate(context.Background(), messages); err != nil {
+		t.Fatal(err)
+	}
+
+	for requestNumber := 1; requestNumber <= 3; requestNumber++ {
+		requestBody := <-requests
+		if requestBody["reasoning_effort"] != "none" {
+			t.Fatalf("request %d reasoning_effort = %v, body = %+v", requestNumber, requestBody["reasoning_effort"], requestBody)
+		}
+		if tools, ok := requestBody["tools"].([]any); !ok || len(tools) != 1 {
+			t.Fatalf("request %d tools = %#v", requestNumber, requestBody["tools"])
+		}
+		if requestBody["max_completion_tokens"] != float64(4096) {
+			t.Fatalf("request %d max_completion_tokens = %v", requestNumber, requestBody["max_completion_tokens"])
+		}
 	}
 }
 
